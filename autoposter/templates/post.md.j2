@@ -1,0 +1,55 @@
+---
+title: "{{ month_name }} {{ year }} Development Update"
+layout: post
+---
+
+# {{ month_name }} {{ year }} Development Update
+
+{{ intro }}
+
+<!-- add hand-written highlights here -->
+
+## Development Updates
+
+Summaries of merged pull requests (and significant issues or releases) for
+each project this month.
+
+{% for bullet in dev_updates %}
+- {{ bullet }}
+{% endfor %}
+
+### By the Numbers
+
+| Metric                        |{% for col in metrics_columns %} {{ col }} |{% endfor %}
+
+| ----------------------------- |{% for col in metrics_columns %} -----------: |{% endfor %}
+
+| Open issues                   |{% for m in metrics_rows %} {{ m.open_issues }} |{% endfor %}
+
+| Merged pull requests          |{% for m in metrics_rows %} {{ m.merged_prs }} |{% endfor %}
+
+| Commits                       |{% for m in metrics_rows %} {{ m.commits }} |{% endfor %}
+
+| Releases                      |{% for m in metrics_rows %} {{ m.releases }} |{% endfor %}
+
+| Active contributors           |{% for m in metrics_rows %} {{ m.active_contributors }} |{% endfor %}
+
+| New contributors              |{% for m in metrics_rows %} {{ m.new_contributors }} |{% endfor %}
+
+| Google Group messages          |{% for m in metrics_rows %} {{ m.google_group_messages }} |{% endfor %}
+
+| Tool runs (TLC / Apalache)    |{% for m in metrics_rows %} {{ m.tlc_runs }} / {{ m.apalache_runs }} |{% endfor %}
+
+
+![Pull requests per month](./assets/{{ year }}-{{ month_padded }}/prs_per_month.svg)
+![Commits per month](./assets/{{ year }}-{{ month_padded }}/commits_per_month.svg)
+![Active contributors per month](./assets/{{ year }}-{{ month_padded }}/active_contributors_per_month.svg)
+
+> Tool usage stats are opt-in and anonymized; actual usage is likely higher.
+> Source: [metabase.tlapl.us](https://metabase.tlapl.us/public/dashboard/cf7e1a79-19b6-4be1-88bf-0a3fd5aa0dec).
+
+### Community & Events
+
+{% for item in community_items %}
+- {{ item }}
+{% endfor %}
