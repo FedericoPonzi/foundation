@@ -1,0 +1,68 @@
+name: Monthly Dev Update
+
+on:
+  schedule:
+    # 9am UTC on the 1st of each month
+    - cron: '0 9 1 * *'
+  workflow_dispatch:
+    inputs:
+      month:
+        description: 'Target month (1-12). Leave empty for previous month.'
+        required: false
+        type: string
+      year:
+        description: 'Target year (e.g. 2026). Leave empty for auto.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  devupdate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install autoposter
+        run: pip install -e ./autoposter
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
+      - name: Run devupdate
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          DEVUPDATE_LLM_PROVIDER: azure_openai
+        run: |
+          ARGS="--repo-dir ."
+          if [ -n "${{ inputs.month }}" ]; then
+            ARGS="$ARGS --month ${{ inputs.month }}"
+          fi
+          if [ -n "${{ inputs.year }}" ]; then
+            ARGS="$ARGS --year ${{ inputs.year }}"
+          fi
+          devupdate pr $ARGS
+
+      - name: Upload output as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: devupdate-output
+          path: |
+            output/
+          retention-days: 14
