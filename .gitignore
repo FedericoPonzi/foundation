@@ -6,3 +6,10 @@ public/
 .vscode
 .keep_vendor
 _vendor/
+
+# Python / autoposter
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+autoposter/output/
