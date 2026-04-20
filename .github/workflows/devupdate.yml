@@ -4,6 +4,11 @@ on:
   schedule:
     # 9am UTC on the 1st of each month
     - cron: '0 9 1 * *'
+  # TODO: remove — temporary trigger to iterate on the workflow without
+  # waiting for the cron or clicking "Run workflow" by hand.
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       month:
