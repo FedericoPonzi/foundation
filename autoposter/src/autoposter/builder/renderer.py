@@ -66,6 +66,7 @@ def render_post(
     rendered = template.render(
         intro=summarized.intro,
         dev_updates=summarized.dev_update_bullets,
+        dev_filtered_comment=summarized.dev_filtered_comment,
         metrics=summarized.metrics,
         metrics_rows=metrics_rows,
         metrics_columns=metrics_columns,

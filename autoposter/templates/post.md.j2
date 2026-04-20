@@ -16,6 +16,10 @@ each project this month.
 {% for bullet in dev_updates %}
 - {{ bullet }}
 {% endfor %}
+{% if dev_filtered_comment %}
+
+{{ dev_filtered_comment }}
+{% endif %}
 
 ### By the Numbers
 

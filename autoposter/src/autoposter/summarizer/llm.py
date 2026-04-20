@@ -133,21 +133,27 @@ class LlmClient:
 
     # -- public API ---------------------------------------------------------
 
-    def summarize_items(self, items: list[CollectedItem]) -> list[str]:
-        """Return a bullet string for each item, grouped by project and sorted by merge date.
+    def summarize_items(
+        self, items: list[CollectedItem]
+    ) -> tuple[list[str], str]:
+        """Return (bullets, filtered_comment) for the dev-update section.
 
-        Items with a ``changelog_body`` are formatted directly; the rest are
-        sent to the LLM in a single batch.
+        ``filtered_comment`` is the trailing ``<!-- Filtered items ... -->``
+        block emitted by the LLM (empty string when nothing was filtered or
+        no LLM call was made).
+
+        Items with a ``changelog_body`` are formatted directly and prepended
+        to the LLM's bullets in canonical project order; the rest are sent
+        to the LLM in a single batch and the LLM decides what to keep,
+        skip, or merge (per ``prompts/summarize.txt``).
         """
         grouped = _group_and_sort(items)
-        changelog_bullets: dict[int, str] = {}
-        llm_items: list[tuple[int, CollectedItem]] = []
+        changelog_bullets: list[str] = []
+        llm_items: list[CollectedItem] = []
 
-        # Assign a global index so we can stitch results back in order.
-        idx = 0
         for item in grouped:
             if item.changelog_body:
-                changelog_bullets[idx] = _format_changelog_bullet(item)
+                changelog_bullets.append(_format_changelog_bullet(item))
                 log.info(
                     "Item #%d (%s #%d) uses changelog fence, skipping LLM",
                     item.number,
@@ -155,38 +161,22 @@ class LlmClient:
                     item.number,
                 )
             else:
-                llm_items.append((idx, item))
-            idx += 1
+                llm_items.append(item)
 
-        # Summarize non-changelog items via LLM.
-        llm_bullets: dict[int, str] = {}
+        llm_bullets: list[str] = []
+        filtered_comment = ""
         if llm_items:
-            items_text = _format_items_for_prompt([it for _, it in llm_items])
+            items_text = _format_items_for_prompt(llm_items)
             prompt = self._prompt_template.replace("{items}", items_text)
             raw = self._chat(
                 system="You are a concise technical writer for the TLA+ Foundation.",
                 user=prompt,
             )
-            parsed = _parse_bullet_list(raw)
-            for i, (global_idx, _item) in enumerate(llm_items):
-                if i < len(parsed):
-                    llm_bullets[global_idx] = parsed[i]
-                else:
-                    log.warning(
-                        "LLM returned fewer bullets than expected (%d vs %d)",
-                        len(parsed),
-                        len(llm_items),
-                    )
+            llm_bullets, filtered_comment = _split_bullets_and_comment(raw)
 
-        # Merge in global order.
-        total = len(grouped)
-        bullets: list[str] = []
-        for i in range(total):
-            if i in changelog_bullets:
-                bullets.append(changelog_bullets[i])
-            elif i in llm_bullets:
-                bullets.append(llm_bullets[i])
-        return bullets
+        # Changelog bullets first (already in canonical project order),
+        # then the LLM's own ordering.
+        return changelog_bullets + llm_bullets, filtered_comment
 
     def summarize_community(
         self,
@@ -322,6 +312,25 @@ def _parse_bullet_list(text: str) -> list[str]:
     return bullets
 
 
+def _split_bullets_and_comment(text: str) -> tuple[list[str], str]:
+    """Split an LLM response into (bullets, html_comment_block).
+
+    The prompt instructs the model to emit a Markdown bulleted list followed
+    optionally by a single ``<!-- ... -->`` block. We locate the first
+    ``<!--`` and treat everything from there to the matching ``-->`` as the
+    comment block; bullets are parsed from the part above.
+    """
+    text = text.strip()
+    match = re.search(r"<!--.*?-->", text, flags=re.DOTALL)
+    if match:
+        bullets_text = text[: match.start()].rstrip()
+        comment = match.group(0).strip()
+    else:
+        bullets_text = text
+        comment = ""
+    return _parse_bullet_list(bullets_text), comment
+
+
 # ---------------------------------------------------------------------------
 # Top-level orchestrator
 # ---------------------------------------------------------------------------
@@ -365,8 +374,12 @@ def summarize(
     )
 
     # 1. Development update bullets.
-    dev_bullets = client.summarize_items(collected.items)
-    log.info("Generated %d development bullets", len(dev_bullets))
+    dev_bullets, dev_filtered_comment = client.summarize_items(collected.items)
+    log.info(
+        "Generated %d development bullets (%d chars filtered comment)",
+        len(dev_bullets),
+        len(dev_filtered_comment),
+    )
 
     # 2. Community & events bullets.
     community_bullets = client.summarize_community(
@@ -384,5 +397,6 @@ def summarize(
         year=collected.year,
         intro=intro,
         dev_update_bullets=dev_bullets,
+        dev_filtered_comment=dev_filtered_comment,
         community_bullets=community_bullets,
     )

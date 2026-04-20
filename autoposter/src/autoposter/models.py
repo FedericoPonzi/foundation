@@ -197,6 +197,9 @@ class SummarizedData:
     year: int
     intro: str = ""
     dev_update_bullets: list[str] = field(default_factory=list)
+    dev_filtered_comment: str = ""
+    """Trailing HTML comment block listing items the LLM filtered out
+    (empty when nothing was filtered)."""
     community_bullets: list[str] = field(default_factory=list)
     metrics: MetricsSnapshot | None = None
 
@@ -208,6 +211,7 @@ class SummarizedData:
                     "year": self.year,
                     "intro": self.intro,
                     "dev_update_bullets": self.dev_update_bullets,
+                    "dev_filtered_comment": self.dev_filtered_comment,
                     "community_bullets": self.community_bullets,
                     "metrics": self.metrics.to_dict() if self.metrics else None,
                 },
@@ -223,6 +227,7 @@ class SummarizedData:
             year=data["year"],
             intro=data.get("intro", ""),
             dev_update_bullets=data.get("dev_update_bullets", []),
+            dev_filtered_comment=data.get("dev_filtered_comment", ""),
             community_bullets=data.get("community_bullets", []),
             metrics=(
                 MetricsSnapshot.from_dict(data["metrics"])

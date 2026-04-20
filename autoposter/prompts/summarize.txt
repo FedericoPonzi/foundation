@@ -14,12 +14,43 @@ Style guidelines:
 - Match the tone of the TLA+ Foundation dev updates:
   https://foundation.tlapl.us/blog/2025-02-dev-update/
 
-For the intro section:
-- Write 2–3 sentences naming the month's focus areas.
-- Reference the most significant changes from the development updates.
+Filtering rules — drop low-value items from the post and list them only in a
+trailing HTML comment so an editor can re-add them if they disagree:
+- `bot`         : automated PRs from scala-steward, dependabot, renovate,
+                  github-actions[bot], copilot[bot], etc.
+- `dep-update`  : dependency or version bumps with no functional change.
+- `testing`     : changes that only touch tests, CI, or scaffolding.
+- `low-impact`  : trivial typo/comment/lint fixes with no user-visible effect.
+- `merged-into-latest` : an older release in a same-project release group
+                  whose notes were folded into a single combined release bullet.
 
-Here are the collected items to summarize:
+Release-merging rule:
+- When the same project has multiple releases this month (e.g.,
+  Apalache 0.54.0, 0.55.0, 0.55.1), collapse them into ONE bullet that
+  summarises what changed across the whole range. Link only to the
+  LATEST release. Mark the older releases as `merged-into-latest` in the
+  trailing HTML comment.
+
+Output format — output BOTH parts in this exact order:
+
+1. A Markdown bulleted list (using `-`) of the bullets you kept. Nothing
+   else before or between them.
+
+2. Then, on its own line, a single HTML comment block listing every item
+   you filtered away, one per line, in this exact format:
+
+       <!--
+       Filtered items (editor: re-add if you disagree):
+       - [Project] Title (url) — reason
+       - [Project] Title (url) — reason
+       -->
+
+   Use one of the reasons defined above. If nothing was filtered, omit
+   the comment block entirely.
+
+For the intro section (separate request later), you'll get the kept bullets
+and write 2–3 sentences naming the month's focus areas.
+
+Here are the collected items to summarise:
 
 {items}
-
-Write a summary bullet for each item. Output as a Markdown bulleted list.

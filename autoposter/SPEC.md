@@ -106,6 +106,44 @@ Project name prefixes and source repos:
 Bullets are grouped by project in the order above and otherwise sorted
 by merge date.
 
+#### Filtering & release-merging
+
+Not every PR / issue / release is interesting to end users. The LLM is
+asked to act as the editor and decide what to drop. The criteria the
+prompt enumerates are:
+
+- `bot`         : automated PRs (scala-steward, dependabot, renovate,
+                  github-actions[bot], copilot[bot], etc.)
+- `dep-update`  : dependency or version bumps with no functional change
+- `testing`     : changes that only touch tests, CI, or scaffolding
+- `low-impact`  : trivial typo / comment / lint fixes with no
+                  user-visible effect
+- `merged-into-latest` : an older release in a same-project release
+                  group whose notes were folded into a single combined
+                  release bullet
+
+When the same project has multiple releases in the same month (e.g.,
+Apalache 0.54.0, 0.55.0, 0.55.1), the LLM collapses them into ONE
+bullet that summarises what changed across the whole range and links
+only to the LATEST release. The older releases are reported in the
+filtered-items comment block with reason `merged-into-latest`.
+
+Filtered items are **not deleted** — the LLM emits a single trailing
+HTML comment block at the end of the Development Updates section
+listing every dropped item with its one-word reason, so an editor
+reviewing the PR can re-add anything they disagree with:
+
+```
+<!--
+Filtered items (editor: re-add if you disagree):
+- [TLC] Bump scala-steward dep (https://...) — bot
+- [Apalache] Release 0.54.0 (https://...) — merged-into-latest
+-->
+```
+
+Items that carry an explicit ```changelog``` fence bypass the LLM
+entirely and are always kept (see Contributor-Authored Entries below).
+
 ### By the Numbers
 
 The metrics table shows a **3-month window**: the selected month plus the
