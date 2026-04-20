@@ -42,13 +42,12 @@ each project this month.
 
 | Metric                        | Jan 2026 | Feb 2026 | Mar 2026 |
 | ----------------------------- | -------: | -------: | -------: |
-| Open issues                   |        0 |        0 |      643 |
-| Merged pull requests          |        0 |        0 |       46 |
+| Open issues                   |      612 |      630 |      643 |
+| Merged pull requests          |       28 |       33 |       46 |
 | Commits                       |       82 |       71 |      136 |
-| Releases                      |        0 |        0 |        5 |
 | Active contributors           |        7 |        5 |       11 |
 | New contributors              |        0 |        1 |        1 |
-| Google Group messages          |        0 |        0 |       40 |
+| Google Group messages          |       18 |       22 |       40 |
 | Tool runs (TLC)               |   263941 |    97573 |   209261 |
 
 ![Pull requests per month](prs_per_month.svg)
@@ -150,12 +149,16 @@ The metrics table shows a **3-month window**: the selected month plus the
 2 prior months. This gives context for trends without needing to scroll
 through charts.
 
-Across all tracked repos, the builder counts merged PRs,
-commits, releases, active contributors, and first-time contributors.
-`Open issues` is a snapshot taken at run time (only available for the
-selected month; prior months show 0). `Google Group messages` comes
-from the public mailing list archive at
-<https://discuss.tlapl.us/maillist.html> (only for the selected month).
+Across all tracked repos, the builder counts merged PRs, commits,
+active contributors, and first-time contributors. (A `Releases` row
+used to be tracked but was dropped: TLC and most projects roll
+releases continuously, so the metric was misleading; release activity
+is still surfaced as bullets in the Development Updates section.)
+`Open issues` is computed via the GitHub Search API as
+`is:issue created:<=EOM minus is:issue closed:<=EOM` so it works for
+both the selected month and prior months. `Google Group messages`
+comes from the public mailing list archive at
+<https://discuss.tlapl.us/maillist.html> and is fetched per month.
 `Tool runs (TLC)` comes from the public Metabase dashboard at
 <https://metabase.tlapl.us/public/dashboard/cf7e1a79-19b6-4be1-88bf-0a3fd5aa0dec>,
 queried via the dashboard card API. Only TLC runs are tracked (Apalache
@@ -163,9 +166,10 @@ telemetry is not available via the public dashboard).
 
 Prior month metrics are collected automatically:
 - **Commits and contributors**: from `git log` on cached bare clones (zero API calls)
+- **Open issues**: 2 GitHub Search API calls per repo per month
+- **Merged PRs**: 1 GitHub Search API call per repo per month
 - **TLC tool runs**: from the same Metabase API response (returns all months)
-- **Other metrics** (merged PRs, releases, open issues, Google Group): only
-  available for the selected month; prior months show 0 for these.
+- **Google Group messages**: one mailing-list scrape per prior month
 
 Each run appends the month's row to `output/metrics_history.json`.
 The builder renders 3 per-month line charts as SVGs placed in the same

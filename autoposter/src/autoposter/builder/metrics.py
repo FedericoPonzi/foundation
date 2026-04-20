@@ -22,7 +22,6 @@ def compute_metrics(collected: CollectedData) -> MetricsSnapshot:
     open_issues = 0
     merged_prs = 0
     commits = 0
-    releases = 0
     active_contributors: set[str] = set()
     new_contributors: set[str] = set()
 
@@ -30,7 +29,6 @@ def compute_metrics(collected: CollectedData) -> MetricsSnapshot:
         open_issues += rs.open_issues
         merged_prs += rs.merged_prs
         commits += rs.commits
-        releases += rs.releases
         active_contributors |= rs.active_contributors
         new_contributors |= rs.new_contributors
 
@@ -40,7 +38,6 @@ def compute_metrics(collected: CollectedData) -> MetricsSnapshot:
         open_issues=open_issues,
         merged_prs=merged_prs,
         commits=commits,
-        releases=releases,
         active_contributors=len(active_contributors),
         new_contributors=len(new_contributors),
         google_group_messages=collected.google_group_message_count,

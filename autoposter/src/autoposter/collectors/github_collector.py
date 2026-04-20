@@ -387,6 +387,39 @@ def _fetch_open_issues_count(
     return int(data.get("open_issues_count", 0))
 
 
+def _search_total_count(client: httpx.Client, q: str) -> int:
+    """Return ``total_count`` for a search query (1 API call, no pagination)."""
+    resp = client.get("/search/issues", params={"q": q, "per_page": "1"})
+    _check_rate_limit(resp)
+    resp.raise_for_status()
+    data = resp.json()
+    return int(data.get("total_count", 0))
+
+
+def _fetch_open_issues_at_eom(
+    client: httpx.Client,
+    owner: str,
+    repo: str,
+    year: int,
+    month: int,
+) -> int:
+    """Approximate "open issues" snapshot at end of *year*/*month*.
+
+    Computed as: (issues created on or before EOM) - (issues closed on or
+    before EOM). Uses 2 search-API calls; pull requests are excluded
+    explicitly because GitHub's `is:issue` already excludes them but we
+    pin it for clarity.
+    """
+    _, eom, _ = _month_boundaries(year, month)
+    eom_iso = eom.isoformat()
+    base = f"repo:{owner}/{repo} is:issue"
+    created = _search_total_count(client, f"{base} created:<={eom_iso}")
+    closed = _search_total_count(
+        client, f"{base} closed:<={eom_iso}",
+    )
+    return max(0, created - closed)
+
+
 # ---------------------------------------------------------------------------
 # Per-repo orchestration
 # ---------------------------------------------------------------------------
@@ -530,7 +563,6 @@ def _collect_one_repo(
         open_issues=open_issues,
         merged_prs=len(merged_prs),
         commits=commit_count,
-        releases=len(releases),
         active_contributors=active_contributors,
         new_contributors=new_contributors,
     )
@@ -623,50 +655,99 @@ def collect_github_metrics_only(
     year: int,
     month: int,
     cache_dir: Path | None = None,
+    *,
+    github_token: str | None = None,
+    fetch_open_issues: bool = False,
+    fetch_merged_prs: bool = False,
 ) -> list[RepoStats]:
-    """Collect just commit/contributor stats for a month using only git (no API calls).
+    """Collect commit/contributor (and optionally open-issue / merged-PR) stats.
+
+    Commits, active contributors, and new contributors are computed from
+    cached bare clones (zero API calls). When *fetch_open_issues* is
+    True, 2 search-API calls per repo are issued to approximate the
+    "open issues at end of month" snapshot. When *fetch_merged_prs* is
+    True, 1 additional search-API call per repo counts merged PRs in
+    the month.
 
     Requires bare clones to already exist in *cache_dir* (from a prior
-    ``collect_github`` call). Returns empty stats for repos not yet cloned.
+    ``collect_github`` call). Returns empty stats for repos not yet
+    cloned.
     """
     resolved_cache = cache_dir if cache_dir is not None else _DEFAULT_CACHE_DIR
     if not resolved_cache.exists():
         return []
 
-    month_start, _month_end, next_month_start = _month_boundaries(year, month)
+    month_start, month_end, next_month_start = _month_boundaries(year, month)
     git_after = (month_start - timedelta(days=1)).isoformat()
     git_before = next_month_start.isoformat()
 
+    api_client: httpx.Client | None = None
+    if fetch_open_issues or fetch_merged_prs:
+        api_client = _build_client(github_token or os.environ.get("GITHUB_TOKEN"))
+
     all_stats: list[RepoStats] = []
 
-    for repo_cfg in repos:
-        slug: str = repo_cfg["slug"]
-        owner, repo = slug.split("/", 1)
-        repo_dir = resolved_cache / owner / f"{repo}.git"
+    try:
+        for repo_cfg in repos:
+            slug: str = repo_cfg["slug"]
+            owner, repo = slug.split("/", 1)
+            repo_dir = resolved_cache / owner / f"{repo}.git"
 
-        if not repo_dir.exists():
-            logger.debug("No cached clone for %s — skipping", slug)
-            all_stats.append(RepoStats(repo_slug=slug))
-            continue
+            if not repo_dir.exists():
+                logger.debug("No cached clone for %s — skipping", slug)
+                all_stats.append(RepoStats(repo_slug=slug))
+                continue
 
-        try:
-            branch = _resolve_default_branch(repo_dir)
-            commits = _git_commit_count(repo_dir, branch, git_after, git_before)
-            active = _git_active_contributors(repo_dir, branch, git_after, git_before)
-            historical = _git_historical_contributors(
-                repo_dir, branch, month_start.isoformat(),
-            )
-            new = active - historical
+            try:
+                branch = _resolve_default_branch(repo_dir)
+                commits = _git_commit_count(repo_dir, branch, git_after, git_before)
+                active = _git_active_contributors(
+                    repo_dir, branch, git_after, git_before,
+                )
+                historical = _git_historical_contributors(
+                    repo_dir, branch, month_start.isoformat(),
+                )
+                new = active - historical
 
-            all_stats.append(RepoStats(
-                repo_slug=slug,
-                merged_prs=0,  # would need API
-                commits=commits,
-                active_contributors=active,
-                new_contributors=new,
-            ))
-        except (subprocess.CalledProcessError, OSError):
-            logger.debug("Git stats failed for %s", slug, exc_info=True)
-            all_stats.append(RepoStats(repo_slug=slug))
+                open_issues = 0
+                if api_client is not None and fetch_open_issues:
+                    try:
+                        open_issues = _fetch_open_issues_at_eom(
+                            api_client, owner, repo, year, month,
+                        )
+                    except (httpx.HTTPError, ValueError) as exc:
+                        logger.warning(
+                            "Failed open-issues snapshot for %s @ %d-%02d: %s",
+                            slug, year, month, exc,
+                        )
+
+                merged_prs_count = 0
+                if api_client is not None and fetch_merged_prs:
+                    try:
+                        q = (
+                            f"repo:{owner}/{repo} is:pr is:merged "
+                            f"merged:{month_start.isoformat()}..{month_end.isoformat()}"
+                        )
+                        merged_prs_count = _search_total_count(api_client, q)
+                    except (httpx.HTTPError, ValueError) as exc:
+                        logger.warning(
+                            "Failed merged-PRs count for %s @ %d-%02d: %s",
+                            slug, year, month, exc,
+                        )
+
+                all_stats.append(RepoStats(
+                    repo_slug=slug,
+                    open_issues=open_issues,
+                    merged_prs=merged_prs_count,
+                    commits=commits,
+                    active_contributors=active,
+                    new_contributors=new,
+                ))
+            except (subprocess.CalledProcessError, OSError):
+                logger.debug("Git stats failed for %s", slug, exc_info=True)
+                all_stats.append(RepoStats(repo_slug=slug))
+    finally:
+        if api_client is not None:
+            api_client.close()
 
     return all_stats

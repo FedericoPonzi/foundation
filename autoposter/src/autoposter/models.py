@@ -60,7 +60,6 @@ class RepoStats:
     open_issues: int = 0
     merged_prs: int = 0
     commits: int = 0
-    releases: int = 0
     active_contributors: set[str] = field(default_factory=set)
     new_contributors: set[str] = field(default_factory=set)
 
@@ -76,7 +75,8 @@ class RepoStats:
         data = dict(data)
         data["active_contributors"] = set(data.get("active_contributors", []))
         data["new_contributors"] = set(data.get("new_contributors", []))
-        return cls(**data)
+        allowed = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
 
 
 @dataclass
@@ -122,7 +122,6 @@ class MetricsSnapshot:
     open_issues: int = 0
     merged_prs: int = 0
     commits: int = 0
-    releases: int = 0
     active_contributors: int = 0
     new_contributors: int = 0
     google_group_messages: int = 0
@@ -133,7 +132,9 @@ class MetricsSnapshot:
 
     @classmethod
     def from_dict(cls, data: dict) -> Self:
-        return cls(**data)
+        # Tolerate retired fields (e.g., legacy "releases").
+        allowed = {f.name for f in cls.__dataclass_fields__.values()}
+        return cls(**{k: v for k, v in data.items() if k in allowed})
 
 
 @dataclass

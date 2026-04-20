@@ -86,6 +86,7 @@ def _ensure_prior_months(
     """Collect metrics for the 2 months prior to cfg.month if missing from history."""
     from autoposter.builder.metrics import append_to_history
     from autoposter.collectors.github_collector import collect_github_metrics_only
+    from autoposter.collectors.google_group import collect_google_group
     from autoposter.collectors.metabase import collect_metabase_multi
     from autoposter.models import MetricsSnapshot
 
@@ -111,21 +112,41 @@ def _ensure_prior_months(
     for y, m in missing:
         click.echo(f"  collecting metrics for {y}-{m:02d}")
 
-        # Git-based stats
-        repo_stats = collect_github_metrics_only(repos, y, m, cache_dir=cache_dir)
+        # Git-based stats (+ open-issues snapshot + merged-PR count via Search API)
+        repo_stats = collect_github_metrics_only(
+            repos, y, m, cache_dir=cache_dir,
+            fetch_open_issues=True, fetch_merged_prs=True,
+        )
         commits = sum(rs.commits for rs in repo_stats)
+        open_issues = sum(rs.open_issues for rs in repo_stats)
+        merged_prs = sum(rs.merged_prs for rs in repo_stats)
         active = set()
         new = set()
         for rs in repo_stats:
             active |= rs.active_contributors
             new |= rs.new_contributors
 
+        # Google Group messages for this prior month
+        gg_count = 0
+        try:
+            _threads, gg_count = collect_google_group(
+                cfg.google_group.archive_url, y, m,
+            )
+        except Exception:
+            log.warning(
+                "Failed to fetch prior Google Group data for %d-%02d",
+                y, m, exc_info=True,
+            )
+
         snapshot = MetricsSnapshot(
             month=m,
             year=y,
+            open_issues=open_issues,
+            merged_prs=merged_prs,
             commits=commits,
             active_contributors=len(active),
             new_contributors=len(new),
+            google_group_messages=gg_count,
             tlc_runs=tlc_by_month.get((y, m), 0),
         )
         history = append_to_history(snapshot, history_path)
@@ -550,7 +571,7 @@ def collect_github_cmd(ctx: click.Context) -> None:
     for rs in repo_stats:
         click.echo(
             f"  {rs.repo_slug}: {rs.merged_prs} PRs, {rs.commits} commits, "
-            f"{rs.releases} releases, {rs.open_issues} open issues, "
+            f"{rs.open_issues} open issues, "
             f"{len(rs.active_contributors)} contributors"
         )
 

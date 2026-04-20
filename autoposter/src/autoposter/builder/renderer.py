@@ -115,7 +115,7 @@ def _build_metrics_window(
     # If we have no history at all, fall back to just the current metrics placeholder
     if not rows:
         rows.append({
-            "open_issues": 0, "merged_prs": 0, "commits": 0, "releases": 0,
+            "open_issues": 0, "merged_prs": 0, "commits": 0,
             "active_contributors": 0, "new_contributors": 0,
             "google_group_messages": 0, "tlc_runs": 0,
         })
