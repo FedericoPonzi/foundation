@@ -1,7 +1,7 @@
 +++
 type = "blog"
-title = '{{ month_name }} {{ year }} Monthly Development Update'
-date = {{ year }}-{{ month_padded }}-15
+title = '{{ period_label }} {{ period_kind_label }} Development Update'
+date = {{ frontmatter_date }}
 +++
 
 {{ intro }}
@@ -11,7 +11,7 @@ date = {{ year }}-{{ month_padded }}-15
 ## Development Updates
 
 Summaries of merged pull requests (and significant issues or releases) for
-each project this month.
+each project this {{ period_kind_word }}.
 
 {% for bullet in dev_updates %}
 - {{ bullet }}

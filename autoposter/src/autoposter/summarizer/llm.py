@@ -138,16 +138,22 @@ class LlmClient:
     ) -> tuple[list[str], str]:
         """Return (bullets, filtered_comment) for the dev-update section.
 
+        Bot-authored items are dropped here (they never reach the LLM).
+        Items with a ``changelog_body`` are formatted directly and
+        prepended to the LLM's bullets in canonical project order; the
+        rest are sent to the LLM in a single batch and the LLM decides
+        what to keep, skip, or merge (per ``prompts/summarize.txt``).
+
         ``filtered_comment`` is the trailing ``<!-- Filtered items ... -->``
         block emitted by the LLM (empty string when nothing was filtered or
         no LLM call was made).
-
-        Items with a ``changelog_body`` are formatted directly and prepended
-        to the LLM's bullets in canonical project order; the rest are sent
-        to the LLM in a single batch and the LLM decides what to keep,
-        skip, or merge (per ``prompts/summarize.txt``).
         """
-        grouped = _group_and_sort(items)
+        non_bot = [it for it in items if not _is_bot_author(it.author)]
+        bot_count = len(items) - len(non_bot)
+        if bot_count:
+            log.info("Pre-filtered %d bot-authored item(s)", bot_count)
+
+        grouped = _group_and_sort(non_bot)
         changelog_bullets: list[str] = []
         llm_items: list[CollectedItem] = []
 
@@ -174,14 +180,13 @@ class LlmClient:
             )
             llm_bullets, filtered_comment = _split_bullets_and_comment(raw)
 
-        # Changelog bullets first (already in canonical project order),
-        # then the LLM's own ordering.
         return changelog_bullets + llm_bullets, filtered_comment
 
     def summarize_community(
         self,
         threads: list[CommunityThread],
         grants: list[GrantInfo],
+        period_kind: str = "month",
     ) -> list[str]:
         """Return community bullet strings for notable threads and grants."""
         if not threads and not grants:
@@ -196,9 +201,10 @@ class LlmClient:
             desc = f" — {g.description}" if g.description else ""
             parts.append(f"- Grant: \"{g.title}\"{desc} — {g.url}")
 
+        period_word = "quarterly" if period_kind == "quarter" else "monthly"
         user_msg = (
-            "Summarize these TLA+ community items into concise bullets for a "
-            "monthly blog post. Each bullet should be one sentence. Use "
+            f"Summarize these TLA+ community items into concise bullets for a "
+            f"{period_word} blog post. Each bullet should be one sentence. Use "
             "Markdown links.\n\n" + "\n".join(parts)
         )
         raw = self._chat(
@@ -211,6 +217,8 @@ class LlmClient:
         self,
         dev_bullets: list[str],
         community_bullets: list[str],
+        period_kind: str = "month",
+        period_label: str = "",
     ) -> str:
         """Generate a 2-3 sentence intro given the already-written sections."""
         context = "## Development Updates\n\n"
@@ -219,16 +227,21 @@ class LlmClient:
             context += "\n\n## Community & Events\n\n"
             context += "\n".join(f"- {b}" for b in community_bullets)
 
+        period_word = "quarter" if period_kind == "quarter" else "month"
+        period_word_adj = "quarterly" if period_kind == "quarter" else "monthly"
+        period_phrase = f" ({period_label})" if period_label else ""
         user_msg = (
-            "Given the following sections of a TLA+ monthly development "
-            "update blog post, write a 2-3 sentence intro paragraph that "
-            "names the month's focus areas and references the most "
+            f"Given the following sections of a TLA+ {period_word_adj} development "
+            f"update blog post{period_phrase}, write a 2-3 sentence intro paragraph "
+            f"that names the {period_word}'s focus areas and references the most "
             "significant changes.\n\n"
             "PRIORITISE bug fixes - especially soundness, correctness, "
             "liveness, and verifier-engine bugs - over feature work or "
             "tooling polish. If a bullet describes a bug fix that could "
             "cause silent incorrect results (e.g., bogus counterexamples, "
             "missed violations, wrong booleans), call it out by name.\n\n"
+            f"Refer to the time period as \"this {period_word}\" (not "
+            f"\"this month\" if it is a quarter).\n\n"
             "Do not use bullet points. Do not use em dashes, en dashes, "
             "or horizontal bars - use regular hyphens instead.\n\n"
             + context
@@ -242,6 +255,24 @@ class LlmClient:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _is_bot_author(author: str) -> bool:
+    """True when *author* looks like an automated account (case-insensitive)."""
+    if not author:
+        return False
+    name = author.lower()
+    if name.endswith("[bot]"):
+        return True
+    return name in {
+        "scala-steward",
+        "dependabot",
+        "renovate",
+        "renovate-bot",
+        "github-actions",
+        "copilot",
+        "pre-commit-ci",
+    }
 
 
 def _group_and_sort(items: list[CollectedItem]) -> list[CollectedItem]:
@@ -324,14 +355,23 @@ def _parse_bullet_list(text: str) -> list[str]:
 def _split_bullets_and_comment(text: str) -> tuple[list[str], str]:
     """Split an LLM response into (bullets, html_comment_block).
 
-    The prompt instructs the model to emit a Markdown bulleted list followed
-    optionally by a single ``<!-- ... -->`` block. We locate the first
-    ``<!--`` and treat everything from there to the matching ``-->`` as the
-    comment block; bullets are parsed from the part above.
+    The prompt produces a Markdown bulleted list optionally followed by
+    a single multi-line ``<!-- Filtered items ... -->`` block. Each
+    bullet may also contain an inline ``<!-- author: name -->`` comment
+    appended to its last line.
+
+    To avoid mistaking the per-bullet author comment for the trailing
+    filtered-items block, we treat as the trailing block only a comment
+    whose opening ``<!--`` sits on its own line (i.e. preceded by start
+    of input or a newline + only whitespace before it). All inline
+    comments are left embedded in the bullets where they belong.
     """
     text = text.strip()
-    match = re.search(r"<!--.*?-->", text, flags=re.DOTALL)
-    if match:
+    candidates = list(
+        re.finditer(r"(?m)^[ \t]*<!--.*?-->", text, flags=re.DOTALL)
+    )
+    if candidates:
+        match = candidates[-1]
         bullets_text = text[: match.start()].rstrip()
         comment = match.group(0).strip()
     else:
@@ -350,6 +390,8 @@ def summarize(
     provider: str,
     model: str,
     prompt_dir: Path | None = None,
+    period_kind: str = "month",
+    period_label: str = "",
     **llm_kwargs: Any,
 ) -> SummarizedData:
     """Summarize collected data into a :class:`SummarizedData` ready for rendering.
@@ -394,11 +436,16 @@ def summarize(
     community_bullets = client.summarize_community(
         collected.community_threads,
         collected.grants,
+        period_kind=period_kind,
     )
     log.info("Generated %d community bullets", len(community_bullets))
 
-    # 3. Intro is written LAST with full context.
-    intro = client.generate_intro(dev_bullets, community_bullets)
+    intro = client.generate_intro(
+        dev_bullets,
+        community_bullets,
+        period_kind=period_kind,
+        period_label=period_label,
+    )
     log.info("Generated intro (%d chars)", len(intro))
 
     return SummarizedData(
