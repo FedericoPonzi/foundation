@@ -153,6 +153,10 @@ class Config:
     github_token: str = ""
     """GitHub API token (from ``GITHUB_TOKEN`` env var)."""
 
+    period_kind: str = "month"
+    """Either ``'month'`` or ``'quarter'``. Determines the period the post
+    covers and how the title, slug, and chart window are rendered."""
+
     # -- helper properties ---------------------------------------------------
 
     @property
@@ -164,6 +168,75 @@ class Config:
     def month_padded(self) -> str:
         """Zero-padded month number, e.g. ``'01'``."""
         return f"{self.month:02d}"
+
+    @property
+    def quarter(self) -> int:
+        """Quarter number 1-4 derived from ``self.month``."""
+        return (self.month - 1) // 3 + 1
+
+    @property
+    def period_months(self) -> list[tuple[int, int]]:
+        """Chronological ``(year, month)`` pairs covered by this period.
+
+        - Monthly mode: a single pair, ``[(year, month)]``.
+        - Quarterly mode: the three months of the quarter that ends at
+          ``(year, month)``. ``month`` for a quarterly run is always the
+          LAST month of the quarter (3, 6, 9, or 12).
+        """
+        if self.period_kind == "quarter":
+            last = self.month
+            first = last - 2
+            return [(self.year, m) for m in range(first, last + 1)]
+        return [(self.year, self.month)]
+
+    @property
+    def display_months(self) -> list[tuple[int, int]]:
+        """Three months used for the chart window and metrics table.
+
+        - Monthly mode: selected month + 2 prior.
+        - Quarterly mode: the three months of the quarter.
+        """
+        if self.period_kind == "quarter":
+            return self.period_months
+        # Monthly: walk back 2 months from anchor.
+        result: list[tuple[int, int]] = []
+        y, m = self.year, self.month
+        for _ in range(3):
+            result.append((y, m))
+            m -= 1
+            if m == 0:
+                m = 12
+                y -= 1
+        result.reverse()
+        return result
+
+    @property
+    def period_slug(self) -> str:
+        """Filesystem-safe identifier, e.g. ``'2026-03'`` or ``'2026-q1'``."""
+        if self.period_kind == "quarter":
+            return f"{self.year}-q{self.quarter}"
+        return f"{self.year}-{self.month:02d}"
+
+    @property
+    def period_label(self) -> str:
+        """Human-readable period name, e.g. ``'March 2026'`` or ``'Q1 2026'``."""
+        if self.period_kind == "quarter":
+            return f"Q{self.quarter} {self.year}"
+        return f"{self.month_name} {self.year}"
+
+    @property
+    def period_kind_label(self) -> str:
+        """``'Monthly'`` or ``'Quarterly'`` (used in the post title)."""
+        return "Quarterly" if self.period_kind == "quarter" else "Monthly"
+
+    @property
+    def frontmatter_date(self) -> str:
+        """ISO date written into the post's TOML frontmatter.
+
+        15th of the anchor month — for quarterly posts that's the 15th
+        of the last month of the quarter.
+        """
+        return f"{self.year}-{self.month:02d}-15"
 
     @property
     def date_range(self) -> tuple[datetime, datetime]:
@@ -207,6 +280,45 @@ def _resolve_auto_month_year(
         month = int(raw_month)
 
     return month, year
+
+
+def parse_period(value: str) -> tuple[str, int, int]:
+    """Parse a CLI period string into ``(period_kind, year, anchor_month)``.
+
+    Accepts:
+    - ``YYYY-MM``  → ``("month", year, month)``
+    - ``YYYY-QN``  (case-insensitive, N=1..4) → ``("quarter", year, last-month-of-quarter)``
+
+    Raises ``ValueError`` on any other input.
+    """
+    s = value.strip().lower()
+    # Quarter form: YYYY-Q[1-4]
+    if "q" in s:
+        try:
+            year_part, q_part = s.split("-q", 1)
+            year = int(year_part)
+            q = int(q_part)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid quarter '{value}'. Expected 'YYYY-QN' (e.g. '2026-Q1')."
+            ) from exc
+        if q < 1 or q > 4:
+            raise ValueError(f"Quarter must be 1-4, got {q}")
+        anchor_month = q * 3  # last month of quarter
+        return ("quarter", year, anchor_month)
+
+    # Month form: YYYY-MM
+    try:
+        year_part, month_part = s.split("-", 1)
+        year = int(year_part)
+        month = int(month_part)
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid period '{value}'. Expected 'YYYY-MM' or 'YYYY-QN'."
+        ) from exc
+    if month < 1 or month > 12:
+        raise ValueError(f"Month must be 1-12, got {month}")
+    return ("month", year, month)
 
 
 def _resolve_llm_secrets(provider: str) -> tuple[str, str]:

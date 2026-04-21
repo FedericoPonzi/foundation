@@ -127,27 +127,42 @@ Azure OpenAI is the default provider. Follow these steps to configure it:
 The CLI entry point is `devupdate`. All commands accept `-v` / `--verbose` for debug logging.
 
 ```bash
-# Full pipeline (collect + summarize + build)
+# Full pipeline (collect + summarize + build) for the auto-detected previous month
 devupdate run
 
-# With month/year override
-devupdate run --month 3 --year 2025
+# Specific month: --period YYYY-MM (or legacy --month/--year)
+devupdate run --period 2026-03
+devupdate run --month 3 --year 2026
+
+# Quarterly post: --period YYYY-QN (covers the 3 months of the quarter)
+devupdate run --period 2026-Q1
 
 # Dry run (skip LLM, use placeholder text)
 devupdate run --dry-run
 
 # Collect data only
-devupdate collect --month 3 --year 2025
+devupdate collect --period 2026-03
+devupdate collect --period 2026-Q1
 
 # Build with custom output directory
 devupdate build --output-dir ./my-output
 
-# Full pipeline + open draft PR
-devupdate pr --repo-dir /path/to/target-repo
+# Full pipeline + open draft PR (works for both monthly and quarterly periods)
+devupdate pr --period 2026-Q1 --repo-dir /path/to/target-repo
 
 # Verbose logging
 devupdate -v run
 ```
+
+Slugs and titles are derived from the period:
+
+| Period            | Slug        | Title                                       |
+|-------------------|-------------|---------------------------------------------|
+| `--period 2026-03`| `2026-03`   | `March 2026 Monthly Development Update`     |
+| `--period 2026-Q1`| `2026-q1`   | `Q1 2026 Quarterly Development Update`      |
+
+In both cases the metrics table and trend charts always show three
+monthly datapoints (Jan/Feb/Mar 2026 in the examples above).
 
 ## Project Structure
 
@@ -213,9 +228,9 @@ ollama pull llama3
 
 Then set `llm.model: llama3` in `config.yaml`.
 
-## GitHub Actions (Automated Monthly Runs)
+## GitHub Actions (Automated Quarterly Runs)
 
-A GitHub Actions workflow runs the full pipeline automatically on the **1st of each month at 9am UTC**, opening a PR with the generated post.
+A GitHub Actions workflow runs the full pipeline automatically about **one week before the end of each quarter at 9am UTC** (Mar 25, Jun 24, Sep 24, Dec 25), opening a PR with the generated quarterly post so reviewers have time to polish it before the quarter actually ends.
 
 ### Setup
 
@@ -232,15 +247,15 @@ A GitHub Actions workflow runs the full pipeline automatically on the **1st of e
 
 ### How it works
 
-- **Monthly cron**: Runs on the 1st of each month, generating a post for the previous month
-- **Manual trigger**: Go to **Actions → Monthly Dev Update → Run workflow** and optionally specify a month/year
+- **Quarterly cron**: Runs ~1 week before each quarter ends, generating a post for the **current (about-to-end) quarter** (e.g. a Mar 25 run produces `Q1` of the same year). Manual runs at other times default to the **previous** quarter.
+- **Manual trigger**: Go to **Actions → Quarterly Dev Update → Run workflow** and optionally specify `period` (e.g. `2026-Q1` for a quarterly post or `2026-03` for a monthly post). Legacy `month`/`year` inputs are still accepted.
 - The workflow installs autoposter, runs the full pipeline, and opens a PR authored by `github-actions[bot]`
-- **Re-runs are safe**: If a branch/PR already exists for that month, the workflow force-pushes the updated commit to the same branch. The existing PR updates automatically — no duplicates are created.
+- **Re-runs are safe**: If a branch/PR already exists for that period, the workflow force-pushes the updated commit to the same branch. The existing PR updates automatically — no duplicates are created.
 - All output files and logs are uploaded as workflow artifacts for debugging
 
 ### Manual trigger
 
 1. Go to the repo's **Actions** tab
-2. Select **Monthly Dev Update** workflow
+2. Select **Quarterly Dev Update** workflow
 3. Click **Run workflow**
-4. Optionally fill in month and year (leave empty for auto = previous month)
+4. Optionally fill in `period` (e.g. `2026-Q1` or `2026-03`); leave empty to default to the previous quarter

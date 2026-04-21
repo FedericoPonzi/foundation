@@ -1,9 +1,14 @@
-# TLA+ Monthly Dev Update: Semi-Automated Blog Post
+# TLA+ Dev Update: Semi-Automated Blog Post
 
-Produce a monthly Markdown post summarizing TLA+ ecosystem activity, in the
+Produce a Markdown post summarizing TLA+ ecosystem activity, in the
 style of the [TLA+ Foundation dev updates](https://foundation.tlapl.us/blog/2025-02-dev-update/).
 A bot drafts the post and opens a pull request. A maintainer reviews and
 merges. Nothing is published automatically.
+
+The post can cover either a **single month** (default) or a whole
+**quarter**. The chosen period drives the title, slug, frontmatter date,
+and which months feed the development-updates summary; the metrics table
+and trend charts always render exactly three monthly datapoints.
 
 ## Post Format
 
@@ -14,11 +19,11 @@ SVG charts, and community items.
 ```markdown
 +++
 type = "blog"
-title = '{Month Year} Monthly Development Update'
+title = '{Period} {Monthly|Quarterly} Development Update'
 date = {YYYY}-{MM}-15
 +++
 
-{2 to 3 sentence intro about the month's focus.}
+{2 to 3 sentence intro about the period's focus.}
 
 <!-- add hand-written highlights here -->
 
@@ -157,9 +162,14 @@ entirely and are always kept (see Contributor-Authored Entries below).
 
 ### By the Numbers
 
-The metrics table shows a **3-month window**: the selected month plus the
-2 prior months. This gives context for trends without needing to scroll
-through charts.
+The metrics table always shows **three monthly datapoints**:
+
+- **Monthly mode**: selected month + 2 prior months (e.g. for `2026-03`,
+  the table shows Jan / Feb / Mar 2026).
+- **Quarterly mode**: the three months of the quarter (e.g. for
+  `2026-Q1`, the table shows Jan / Feb / Mar 2026).
+
+This gives context for trends without needing to scroll through charts.
 
 Across all tracked repos, the builder counts merged PRs, commits,
 active contributors, and first-time contributors. (A `Releases` row
@@ -176,16 +186,19 @@ comes from the public mailing list archive at
 queried via the dashboard card API. Only TLC runs are tracked (Apalache
 telemetry is not available via the public dashboard).
 
-Prior month metrics are collected automatically:
+Each chart-window month not yet present in `output/metrics_history.json`
+is collected automatically (so a quarterly run will fill in any of its
+three months that aren't already cached):
 - **Commits and contributors**: from `git log` on cached bare clones (zero API calls)
 - **Open issues**: 2 GitHub Search API calls per repo per month
 - **Merged PRs**: 1 GitHub Search API call per repo per month
 - **TLC tool runs**: from the same Metabase API response (returns all months)
 - **Google Group messages**: one mailing-list scrape per prior month
 
-Each run appends the month's row to `output/metrics_history.json`.
+Each run appends rows to `output/metrics_history.json`.
 The builder renders 3 per-month line charts as SVGs placed in the same
-directory as the post (`content/blog/{year}-{month}-dev-update/`).
+directory as the post (`content/blog/{slug}-dev-update/`, where
+`{slug}` is e.g. `2026-03` or `2026-q1`).
 
 ### Community & Events
 
@@ -254,20 +267,40 @@ stages can be rerun independently.
    `output/cache/summarized.json`.
 
 3. **Build** — Renders the post from a Jinja2 template (`templates/post.md.j2`),
-   computes the metrics table (3-month window), collects prior month metrics
-   if missing from history, renders SVG charts (pygal), and runs validation
+   computes the metrics table (3 monthly datapoints — for quarterly
+   posts this is the three months of the quarter; for monthly posts the
+   selected month + 2 prior), backfills any chart-window months missing
+   from history, renders SVG charts (pygal), and runs validation
    (no em/en dashes, well-formed TOML frontmatter, URL provenance, chart
-   file existence). Output: `output/{year}-{month}-dev-update/index.md`
-   plus SVG chart files in the same directory.
+   file existence). Output: `output/{slug}-dev-update.md` plus SVG chart
+   files in `output/{slug}-dev-update/` where `{slug}` is e.g. `2026-03`
+   or `2026-q1`.
 
-4. **PR** — Copies post + charts to `content/blog/{year}-{month}-dev-update/`,
-   commits on a `devupdate/{year}-{month}` branch with `-s` (sign-off),
+4. **PR** — Copies post + charts to `content/blog/{slug}-dev-update/`,
+   commits on a `devupdate/{slug}` branch with `-s` (sign-off),
    force-pushes (safe for re-runs), and opens a PR via GitHub REST API.
    If a PR already exists for that branch, it is reused (no duplicates).
    Contributors are listed in the PR body without @-mentions.
 
-All behavior that varies month-to-month (data sources, filters, prompt,
-LLM provider, target repo, schedule) lives in a single `config.yaml`.
+All behavior that varies period-to-period (data sources, filters,
+prompt, LLM provider, target repo, schedule) lives in a single
+`config.yaml`.
+
+## Period: Monthly vs Quarterly
+
+The CLI accepts a `--period` flag that switches between two modes:
+
+- `--period 2026-03` (or default `--month 3 --year 2026`): a **monthly**
+  post. Title: `March 2026 Monthly Development Update`. Slug: `2026-03`.
+  Development-update bullets summarize one month of activity.
+- `--period 2026-Q1`: a **quarterly** post. Title:
+  `Q1 2026 Quarterly Development Update`. Slug: `2026-q1`. The anchor
+  date is the 15th of the last month of the quarter. The collectors
+  loop over the three months of the quarter, concatenate items, and
+  feed the combined set to the LLM as a single batch.
+
+In both modes the metrics table and the three trend charts always show
+exactly three monthly datapoints.
 
 ## Caching
 
@@ -275,10 +308,10 @@ Each pipeline stage caches its output in `output/cache/`:
 
 | File | Contents | Delete to re-run |
 |------|----------|------------------|
-| `github.json` | Merged PRs, releases, repo stats | GitHub collection |
-| `google_group.json` | Threads, message count | Google Group scraping |
-| `metabase.json` | TLC tool-run count | Metabase query |
-| `grants.json` | Grant listings | Grants scraping |
+| `github_{slug}.json` | Merged PRs, releases, repo stats (per period) | GitHub collection for that period |
+| `google_group_{slug}.json` | Threads, message count (per period) | Google Group scraping for that period |
+| `metabase_{slug}.json` | TLC tool-run count (per period) | Metabase query for that period |
+| `grants.json` | Grant listings (global) | Grants scraping |
 | `summarized.json` | LLM-generated summaries | Summarization |
 
 Git repo bare clones are cached in `output/.repo-cache/` and reused

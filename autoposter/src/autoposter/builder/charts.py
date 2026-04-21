@@ -47,7 +47,11 @@ def _make_chart(
     return chart
 
 
-def render_charts(history: list[dict], output_dir: Path) -> list[Path]:
+def render_charts(
+    history: list[dict],
+    output_dir: Path,
+    display_months: list[tuple[int, int]] | None = None,
+) -> list[Path]:
     """Render SVG line charts from the metrics history.
 
     Produces three charts:
@@ -63,6 +67,9 @@ def render_charts(history: list[dict], output_dir: Path) -> list[Path]:
         :func:`autoposter.builder.metrics.append_to_history`.
     output_dir:
         Directory where SVG files will be written (created if missing).
+    display_months:
+        Optional list of ``(year, month)`` tuples; only those months are
+        plotted. When ``None``, the full history is used.
 
     Returns
     -------
@@ -74,6 +81,13 @@ def render_charts(history: list[dict], output_dir: Path) -> list[Path]:
     if not history:
         log.warning("Empty history — no charts to render")
         return []
+
+    if display_months is not None:
+        wanted = set(display_months)
+        history = [e for e in history if (e["year"], e["month"]) in wanted]
+        if not history:
+            log.warning("No history entries match display_months — no charts to render")
+            return []
 
     # Sort chronologically so the x-axis is in order.
     sorted_history = sorted(history, key=lambda e: (e["year"], e["month"]))

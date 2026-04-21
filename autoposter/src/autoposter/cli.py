@@ -64,26 +64,95 @@ def _load_or_run_json(cache: Path, label: str, fn: callable) -> Any:
     return result
 
 
-def _prior_months(year: int, month: int, count: int = 2) -> list[tuple[int, int]]:
-    """Return *count* (year, month) pairs preceding the given month."""
-    result = []
-    y, m = year, month
-    for _ in range(count):
-        m -= 1
-        if m == 0:
-            m = 12
-            y -= 1
-        result.append((y, m))
-    result.reverse()
-    return result
+def _collect_github_period(
+    cfg: Config,
+    progress: bool = False,
+) -> tuple[list, list]:
+    """Collect & merge GitHub items + per-repo stats over ``cfg.period_months``.
+
+    Sums merged_prs and commits across months, unions the contributor sets,
+    and snapshots ``open_issues`` to the latest month's value.
+    """
+    from autoposter.collectors.github_collector import collect_github
+    from autoposter.models import RepoStats
+
+    repos = [{"name": r.name, "slug": r.slug} for r in cfg.repos]
+    cache_dir = Path(cfg.output_dir) / ".repo-cache"
+
+    items: list = []
+    repo_stats_by_slug: dict[str, RepoStats] = {}
+    for y, m in cfg.period_months:
+        if progress and len(cfg.period_months) > 1:
+            click.echo(f"    fetching {y}-{m:02d}")
+        month_items, month_stats = collect_github(
+            repos, y, m,
+            github_token=cfg.github_token,
+            cache_dir=cache_dir,
+        )
+        items.extend(month_items)
+        for rs in month_stats:
+            existing = repo_stats_by_slug.get(rs.repo_slug)
+            if existing is None:
+                repo_stats_by_slug[rs.repo_slug] = rs
+            else:
+                repo_stats_by_slug[rs.repo_slug] = RepoStats(
+                    repo_slug=existing.repo_slug,
+                    merged_prs=existing.merged_prs + rs.merged_prs,
+                    commits=existing.commits + rs.commits,
+                    open_issues=rs.open_issues,
+                    active_contributors=existing.active_contributors | rs.active_contributors,
+                    new_contributors=existing.new_contributors | rs.new_contributors,
+                )
+    return items, list(repo_stats_by_slug.values())
 
 
-def _ensure_prior_months(
+def _collect_google_group_period(
+    cfg: Config,
+    progress: bool = False,
+) -> tuple[list, int]:
+    """Collect & concatenate Google Group threads over ``cfg.period_months``."""
+    from autoposter.collectors.google_group import collect_google_group
+
+    threads: list = []
+    message_count = 0
+    for y, m in cfg.period_months:
+        if progress and len(cfg.period_months) > 1:
+            click.echo(f"    fetching {y}-{m:02d}")
+        month_threads, month_msg_count = collect_google_group(
+            cfg.google_group.archive_url, y, m,
+        )
+        threads.extend(month_threads)
+        message_count += month_msg_count
+    return threads, message_count
+
+
+def _collect_metabase_period(cfg: Config):
+    """Collect & sum Metabase TLC runs over ``cfg.period_months``."""
+    from autoposter.collectors.metabase import collect_metabase, collect_metabase_multi
+    from autoposter.models import ToolRunStats
+
+    if len(cfg.period_months) == 1:
+        return collect_metabase(
+            cfg.metabase.dashboard_url, cfg.metabase.card_uuids,
+            cfg.year, cfg.month,
+        )
+    tlc_by_month = collect_metabase_multi(
+        cfg.metabase.dashboard_url, cfg.period_months,
+    )
+    return ToolRunStats(tlc_runs=sum(tlc_by_month.values()))
+
+
+def _ensure_chart_months(
     cfg: Config,
     history: list[dict],
     history_path: Path,
 ) -> list[dict]:
-    """Collect metrics for the 2 months prior to cfg.month if missing from history."""
+    """Backfill any chart months missing from the metrics history.
+
+    For monthly mode this means the 2 prior months. For quarterly mode
+    this means each of the three months in the quarter (when not already
+    present from a previous run).
+    """
     from autoposter.builder.metrics import append_to_history
     from autoposter.collectors.github_collector import collect_github_metrics_only
     from autoposter.collectors.google_group import collect_google_group
@@ -91,11 +160,11 @@ def _ensure_prior_months(
     from autoposter.models import MetricsSnapshot
 
     existing = {(e["year"], e["month"]) for e in history}
-    prior = _prior_months(cfg.year, cfg.month, count=2)
-    missing = [(y, m) for y, m in prior if (y, m) not in existing]
+    targets = cfg.display_months
+    missing = [(y, m) for y, m in targets if (y, m) not in existing]
 
     if not missing:
-        click.echo("  prior months already in history")
+        click.echo("  chart months already in history")
         return history
 
     # Fetch TLC runs for all missing months in one API call.
@@ -105,14 +174,12 @@ def _ensure_prior_months(
     except Exception:
         log.warning("Failed to fetch prior Metabase data", exc_info=True)
 
-    # Fetch git stats for each missing month.
     repos = [{"name": r.name, "slug": r.slug} for r in cfg.repos]
     cache_dir = Path(cfg.output_dir) / ".repo-cache"
 
     for y, m in missing:
         click.echo(f"  collecting metrics for {y}-{m:02d}")
 
-        # Git-based stats (+ open-issues snapshot + merged-PR count via Search API)
         repo_stats = collect_github_metrics_only(
             repos, y, m, cache_dir=cache_dir,
             fetch_open_issues=True, fetch_merged_prs=True,
@@ -120,13 +187,12 @@ def _ensure_prior_months(
         commits = sum(rs.commits for rs in repo_stats)
         open_issues = sum(rs.open_issues for rs in repo_stats)
         merged_prs = sum(rs.merged_prs for rs in repo_stats)
-        active = set()
-        new = set()
+        active: set[str] = set()
+        new: set[str] = set()
         for rs in repo_stats:
             active |= rs.active_contributors
             new |= rs.new_contributors
 
-        # Google Group messages for this prior month
         gg_count = 0
         try:
             _threads, gg_count = collect_google_group(
@@ -157,17 +223,16 @@ def _ensure_prior_months(
 def _do_collect(cfg: Config) -> CollectedData:
     """Run all four collectors, each cached separately.
 
-    Per-collector caches live in ``output/cache/``.  Delete individual
-    files to re-run a specific collector::
+    Per-collector caches live in ``output/cache/`` and are scoped to the
+    period slug (e.g. ``github_2026-q1.json``). Delete a single file to
+    re-run that collector, or ``rm output/cache/*.json`` for a fresh run.
 
-        rm output/cache/github.json      # re-collect GitHub only
-        rm output/cache/google_group.json # re-collect Google Group only
-        rm output/cache/*.json            # re-collect everything
+    For quarterly periods, GitHub and Google Group data is collected for
+    each of the three months and concatenated into a single
+    :class:`CollectedData`. Metabase already supports multi-month
+    aggregation. Grants are global.
     """
-    from autoposter.collectors.github_collector import collect_github
-    from autoposter.collectors.google_group import collect_google_group
     from autoposter.collectors.grants import collect_grants
-    from autoposter.collectors.metabase import collect_metabase
     from autoposter.models import (
         CommunityThread,
         CollectedItem,
@@ -176,10 +241,12 @@ def _do_collect(cfg: Config) -> CollectedData:
         ToolRunStats,
     )
 
-    _step(f"Collecting data for {cfg.month_name} {cfg.year}")
+    _step(f"Collecting data for {cfg.period_label}")
+
+    slug = cfg.period_slug
 
     # --- GitHub ---
-    gh_cache = _cache_path(cfg, "github.json")
+    gh_cache = _cache_path(cfg, f"github_{slug}.json")
     if gh_cache.exists():
         click.echo(f"[{_now()}]   → GitHub repos: cached ✓")
         gh_data = json.loads(gh_cache.read_text())
@@ -187,13 +254,7 @@ def _do_collect(cfg: Config) -> CollectedData:
         repo_stats = [RepoStats.from_dict(rs) for rs in gh_data["repo_stats"]]
     else:
         t = _step("  → GitHub repos")
-        repos = [{"name": r.name, "slug": r.slug} for r in cfg.repos]
-        cache_dir = Path(cfg.output_dir) / ".repo-cache"
-        items, repo_stats = collect_github(
-            repos, cfg.year, cfg.month,
-            github_token=cfg.github_token,
-            cache_dir=cache_dir,
-        )
+        items, repo_stats = _collect_github_period(cfg, progress=True)
         gh_cache.write_text(json.dumps({
             "items": [asdict(i) for i in items],
             "repo_stats": [rs.to_dict() for rs in repo_stats],
@@ -202,7 +263,7 @@ def _do_collect(cfg: Config) -> CollectedData:
         click.echo(f"    {len(items)} items, {len(repo_stats)} repos")
 
     # --- Google Group ---
-    gg_cache = _cache_path(cfg, "google_group.json")
+    gg_cache = _cache_path(cfg, f"google_group_{slug}.json")
     if gg_cache.exists():
         click.echo(f"[{_now()}]   → Google Group: cached ✓")
         gg_data = json.loads(gg_cache.read_text())
@@ -210,9 +271,7 @@ def _do_collect(cfg: Config) -> CollectedData:
         message_count = gg_data["message_count"]
     else:
         t = _step("  → Google Group")
-        threads, message_count = collect_google_group(
-            cfg.google_group.archive_url, cfg.year, cfg.month,
-        )
+        threads, message_count = _collect_google_group_period(cfg)
         gg_cache.write_text(json.dumps({
             "threads": [asdict(t) for t in threads],
             "message_count": message_count,
@@ -221,19 +280,14 @@ def _do_collect(cfg: Config) -> CollectedData:
         click.echo(f"    {len(threads)} threads, {message_count} messages")
 
     # --- Metabase ---
-    mb_cache = _cache_path(cfg, "metabase.json")
+    mb_cache = _cache_path(cfg, f"metabase_{slug}.json")
     if mb_cache.exists():
         click.echo(f"[{_now()}]   → Metabase: cached ✓")
         mb_data = json.loads(mb_cache.read_text())
         tool_runs = ToolRunStats(**mb_data)
     else:
         t = _step("  → Metabase")
-        tool_runs = collect_metabase(
-            cfg.metabase.dashboard_url,
-            cfg.metabase.card_uuids,
-            cfg.year,
-            cfg.month,
-        )
+        tool_runs = _collect_metabase_period(cfg)
         mb_cache.write_text(json.dumps(asdict(tool_runs), indent=2))
         _done(t)
         click.echo(f"    TLC runs={tool_runs.tlc_runs}")
@@ -276,9 +330,9 @@ def _do_summarize(
 ) -> SummarizedData:
     """Summarize collected data (or produce placeholders when *dry_run*).
 
-    Results are cached to ``summarized.json``. Delete the file to re-summarize.
+    Results are cached to ``summarized_{slug}.json``. Delete the file to re-summarize.
     """
-    cache = _cache_path(cfg, "summarized.json")
+    cache = _cache_path(cfg, f"summarized_{cfg.period_slug}.json")
     if not dry_run and cache.exists():
         click.echo(f"[{_now()}] Summarize: cached ✓")
         return SummarizedData.load(cache)
@@ -351,23 +405,34 @@ def _do_build(
     output_dir = Path(cfg.output_dir)
     history_path = output_dir / "metrics_history.json"
 
-    # Current month metrics
+    # Period metrics:
+    #   - monthly mode: compute the anchor month's snapshot from the
+    #     collected (single-month) data.
+    #   - quarterly mode: the collected data aggregates 3 months, so a
+    #     single snapshot would be misleading. Each month is backfilled
+    #     individually via _ensure_chart_months below.
     t = _step("Computing metrics")
-    snapshot = compute_metrics(collected)
-    summarized.metrics = snapshot
-    history = append_to_history(snapshot, history_path)
+    if cfg.period_kind == "month":
+        snapshot = compute_metrics(collected)
+        summarized.metrics = snapshot
+        history = append_to_history(snapshot, history_path)
+    else:
+        if history_path.exists():
+            history = json.loads(history_path.read_text())
+        else:
+            history = []
     _done(t)
 
-    # Collect prior 2 months if missing from history
-    t = _step("Collecting prior month metrics")
-    history = _ensure_prior_months(cfg, history, history_path)
+    # Backfill any chart months not yet in history (always per-month).
+    t = _step("Collecting chart-window metrics")
+    history = _ensure_chart_months(cfg, history, history_path)
     _done(t)
 
     # Charts — render into the article's content folder so they sit next to index.md
     t = _step("Rendering charts")
-    article_dir = output_dir / f"{cfg.year}-{cfg.month:02d}-dev-update"
+    article_dir = output_dir / f"{cfg.period_slug}-dev-update"
     article_dir.mkdir(parents=True, exist_ok=True)
-    chart_paths = render_charts(history, article_dir)
+    chart_paths = render_charts(history, article_dir, display_months=cfg.display_months)
     _done(t)
 
     # Render
@@ -396,7 +461,7 @@ def _do_build(
             log.warning("Validation: %s", err)
 
     # Write
-    post_path = write_post(content, output_dir, cfg.year, cfg.month)
+    post_path = write_post(content, output_dir, cfg.period_slug)
     click.echo(f"[{_now()}] Wrote {post_path}")
 
     return content, post_path, chart_paths
@@ -412,13 +477,26 @@ def _apply_overrides(
     month: int | None,
     year: int | None,
     output_dir: str | None,
+    period: str | None = None,
 ) -> Config:
-    """Return a new :class:`Config` with any CLI overrides applied."""
+    """Return a new :class:`Config` with any CLI overrides applied.
+
+    ``period`` (e.g. ``'2026-03'`` or ``'2026-Q1'``) takes precedence
+    over ``month`` / ``year``.
+    """
+    from autoposter.config import parse_period
+
     overrides: dict[str, object] = {}
-    if month is not None:
-        overrides["month"] = month
-    if year is not None:
-        overrides["year"] = year
+    if period:
+        kind, p_year, p_month = parse_period(period)
+        overrides["period_kind"] = kind
+        overrides["year"] = p_year
+        overrides["month"] = p_month
+    else:
+        if month is not None:
+            overrides["month"] = month
+        if year is not None:
+            overrides["year"] = year
     if output_dir is not None:
         overrides["output_dir"] = output_dir
     if overrides:
@@ -429,6 +507,23 @@ def _apply_overrides(
 # ---------------------------------------------------------------------------
 # Click CLI
 # ---------------------------------------------------------------------------
+
+
+def _period_options(fn):
+    """Decorator that adds standard ``--period``/``--month``/``--year`` flags."""
+    fn = click.option(
+        "--year", type=int, default=None, help="Override target year (legacy).",
+    )(fn)
+    fn = click.option(
+        "--month", type=int, default=None,
+        help="Override target month, integer 1-12 (legacy).",
+    )(fn)
+    fn = click.option(
+        "--period", "period", type=str, default=None,
+        help="Period: 'YYYY-MM' for a monthly post or 'YYYY-QN' "
+             "(N=1..4) for a quarterly post. Overrides --month/--year.",
+    )(fn)
+    return fn
 
 
 @click.group()
@@ -472,22 +567,22 @@ def main(ctx: click.Context, config_path: Path | None, verbose: bool) -> None:
 
 
 @main.command()
-@click.option("--month", type=int, default=None, help="Override target month.")
-@click.option("--year", type=int, default=None, help="Override target year.")
+@_period_options
 @click.option("--output-dir", type=str, default=None, help="Override output directory.")
 @click.option("--dry-run", is_flag=True, help="Skip LLM calls; use placeholder text.")
 @click.pass_context
 def run(
     ctx: click.Context,
+    period: str | None,
     month: int | None,
     year: int | None,
     output_dir: str | None,
     dry_run: bool,
 ) -> None:
     """Run the full pipeline (collect -> summarize -> build)."""
-    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir)
+    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir, period=period)
     pipeline_start = time.monotonic()
-    click.echo(f"[{_now()}] Pipeline started for {cfg.month_name} {cfg.year}")
+    click.echo(f"[{_now()}] Pipeline started for {cfg.period_label}")
     try:
         collected = _do_collect(cfg)
         summarized = _do_summarize(collected, cfg, dry_run=dry_run)
@@ -510,12 +605,12 @@ def run(
 
 
 @main.group(invoke_without_command=True)
-@click.option("--month", type=int, default=None, help="Override target month.")
-@click.option("--year", type=int, default=None, help="Override target year.")
+@_period_options
 @click.option("--output-dir", type=str, default=None, help="Override output directory.")
 @click.pass_context
 def collect(
     ctx: click.Context,
+    period: str | None,
     month: int | None,
     year: int | None,
     output_dir: str | None,
@@ -525,7 +620,7 @@ def collect(
     Without a subcommand, runs ALL collectors. Use a subcommand to run
     one at a time: github, google-group, metabase, grants.
     """
-    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir)
+    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir, period=period)
     ctx.obj["config"] = cfg
 
     # If no subcommand given, run all collectors.
@@ -541,7 +636,7 @@ def collect(
 
     out = Path(cfg.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    dest = out / "collected.json"
+    dest = out / f"collected_{cfg.period_slug}.json"
     collected.save(dest)
     click.echo(f"Saved collected data to {dest}")
 
@@ -550,18 +645,10 @@ def collect(
 @click.pass_context
 def collect_github_cmd(ctx: click.Context) -> None:
     """Collect merged PRs, releases, and stats from tracked GitHub repos."""
-    from autoposter.collectors.github_collector import collect_github
-
     cfg: Config = ctx.obj["config"]
-    click.echo(f"Collecting GitHub data for {cfg.month_name} {cfg.year} …")
-    repos = [{"name": r.name, "slug": r.slug} for r in cfg.repos]
-    cache_dir = Path(cfg.output_dir) / ".repo-cache"
+    click.echo(f"Collecting GitHub data for {cfg.period_label} …")
     try:
-        items, repo_stats = collect_github(
-            repos, cfg.year, cfg.month,
-            github_token=cfg.github_token,
-            cache_dir=cache_dir,
-        )
+        items, repo_stats = _collect_github_period(cfg, progress=True)
     except Exception as exc:
         click.echo(f"GitHub collection failed: {exc}", err=True)
         log.debug("Traceback:", exc_info=True)
@@ -575,7 +662,7 @@ def collect_github_cmd(ctx: click.Context) -> None:
             f"{len(rs.active_contributors)} contributors"
         )
 
-    _save_json(cfg, "collected_github.json", {
+    _save_json(cfg, f"collected_github_{cfg.period_slug}.json", {
         "items": [_item_to_dict(i) for i in items],
         "repo_stats": [rs.to_dict() for rs in repo_stats],
     })
@@ -585,14 +672,10 @@ def collect_github_cmd(ctx: click.Context) -> None:
 @click.pass_context
 def collect_google_group_cmd(ctx: click.Context) -> None:
     """Collect discussion threads from the TLA+ Google Group archive."""
-    from autoposter.collectors.google_group import collect_google_group
-
     cfg: Config = ctx.obj["config"]
-    click.echo(f"Collecting Google Group threads for {cfg.month_name} {cfg.year} …")
+    click.echo(f"Collecting Google Group threads for {cfg.period_label} …")
     try:
-        threads, message_count = collect_google_group(
-            cfg.google_group.archive_url, cfg.year, cfg.month,
-        )
+        threads, message_count = _collect_google_group_period(cfg, progress=True)
     except Exception as exc:
         click.echo(f"Google Group collection failed: {exc}", err=True)
         log.debug("Traceback:", exc_info=True)
@@ -605,7 +688,7 @@ def collect_google_group_cmd(ctx: click.Context) -> None:
         click.echo(f"  [{t.reply_count} replies] {t.subject}")
 
     from dataclasses import asdict
-    _save_json(cfg, "collected_google_group.json", {
+    _save_json(cfg, f"collected_google_group_{cfg.period_slug}.json", {
         "threads": [asdict(t) for t in threads],
         "message_count": message_count,
     })
@@ -615,15 +698,10 @@ def collect_google_group_cmd(ctx: click.Context) -> None:
 @click.pass_context
 def collect_metabase_cmd(ctx: click.Context) -> None:
     """Collect tool-run telemetry from the Metabase public dashboard."""
-    from autoposter.collectors.metabase import collect_metabase
-
     cfg: Config = ctx.obj["config"]
-    click.echo(f"Collecting Metabase data for {cfg.month_name} {cfg.year} …")
+    click.echo(f"Collecting Metabase data for {cfg.period_label} …")
     try:
-        tool_runs = collect_metabase(
-            cfg.metabase.dashboard_url, cfg.metabase.card_uuids,
-            cfg.year, cfg.month,
-        )
+        tool_runs = _collect_metabase_period(cfg)
     except Exception as exc:
         click.echo(f"Metabase collection failed: {exc}", err=True)
         log.debug("Traceback:", exc_info=True)
@@ -632,7 +710,7 @@ def collect_metabase_cmd(ctx: click.Context) -> None:
     click.echo(f"\nResults: TLC runs={tool_runs.tlc_runs}")
 
     from dataclasses import asdict
-    _save_json(cfg, "collected_metabase.json", asdict(tool_runs))
+    _save_json(cfg, f"collected_metabase_{cfg.period_slug}.json", asdict(tool_runs))
 
 
 @collect.command("grants")
@@ -681,18 +759,18 @@ def _save_json(cfg: Config, filename: str, data: object) -> None:
 
 
 @main.command()
-@click.option("--month", type=int, default=None, help="Override target month.")
-@click.option("--year", type=int, default=None, help="Override target year.")
+@_period_options
 @click.option("--output-dir", type=str, default=None, help="Override output directory.")
 @click.pass_context
 def summarize(
     ctx: click.Context,
+    period: str | None,
     month: int | None,
     year: int | None,
     output_dir: str | None,
 ) -> None:
     """Collect and summarize data, then save as JSON."""
-    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir)
+    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir, period=period)
     try:
         collected = _do_collect(cfg)
         summarized = _do_summarize(collected, cfg)
@@ -703,7 +781,7 @@ def summarize(
 
     out = Path(cfg.output_dir)
     out.mkdir(parents=True, exist_ok=True)
-    dest = out / "summarized.json"
+    dest = out / f"summarized_{cfg.period_slug}.json"
     summarized.save(dest)
     click.echo(f"Saved summarized data to {dest}")
 
@@ -712,18 +790,18 @@ def summarize(
 
 
 @main.command()
-@click.option("--month", type=int, default=None, help="Override target month.")
-@click.option("--year", type=int, default=None, help="Override target year.")
+@_period_options
 @click.option("--output-dir", type=str, default=None, help="Override output directory.")
 @click.pass_context
 def build(
     ctx: click.Context,
+    period: str | None,
     month: int | None,
     year: int | None,
     output_dir: str | None,
 ) -> None:
     """Collect, summarize, and build the final Markdown post."""
-    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir)
+    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir, period=period)
     try:
         collected = _do_collect(cfg)
         summarized = _do_summarize(collected, cfg)
@@ -743,8 +821,7 @@ def build(
 
 
 @main.command()
-@click.option("--month", type=int, default=None, help="Override target month.")
-@click.option("--year", type=int, default=None, help="Override target year.")
+@_period_options
 @click.option("--output-dir", type=str, default=None, help="Override output directory.")
 @click.option(
     "--repo-dir",
@@ -755,6 +832,7 @@ def build(
 @click.pass_context
 def pr(
     ctx: click.Context,
+    period: str | None,
     month: int | None,
     year: int | None,
     output_dir: str | None,
@@ -763,7 +841,7 @@ def pr(
     """Run the full pipeline and open a draft pull request."""
     from autoposter.publisher.pr import publish
 
-    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir)
+    cfg = _apply_overrides(ctx.obj["config"], month, year, output_dir, period=period)
     try:
         collected = _do_collect(cfg)
         summarized = _do_summarize(collected, cfg)
@@ -779,8 +857,9 @@ def pr(
             post_path=post_path,
             asset_paths=chart_paths,
             target_repo=cfg.target_repo,
-            year=cfg.year,
-            month=cfg.month,
+            slug=cfg.period_slug,
+            period_label=cfg.period_label,
+            period_kind_label=cfg.period_kind_label,
             contributors=contributors,
             github_token=cfg.github_token,
             repo_dir=repo_dir,

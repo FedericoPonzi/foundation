@@ -1,9 +1,11 @@
-name: Monthly Dev Update
+name: Quarterly Dev Update
 
 on:
   schedule:
-    # 9am UTC on the 1st of each month
-    - cron: '0 9 1 * *'
+    # ~1 week before the end of each quarter (Mar 25, Jun 24, Sep 24, Dec 25)
+    # at 9am UTC, so reviewers have time to polish the post before the
+    # quarter actually ends.
+    - cron: '0 9 25 3,6,9,12 *'
   # TODO: remove — temporary trigger to iterate on the workflow without
   # waiting for the cron or clicking "Run workflow" by hand.
   push:
@@ -11,12 +13,16 @@ on:
       - main
   workflow_dispatch:
     inputs:
+      period:
+        description: "Period: 'YYYY-MM' (monthly) or 'YYYY-QN' (quarterly). Leave empty for previous quarter."
+        required: false
+        type: string
       month:
-        description: 'Target month (1-12). Leave empty for previous month.'
+        description: '[Legacy] Target month (1-12). Use --period instead.'
         required: false
         type: string
       year:
-        description: 'Target year (e.g. 2026). Leave empty for auto.'
+        description: '[Legacy] Target year (e.g. 2026). Use --period instead.'
         required: false
         type: string
 
@@ -47,6 +53,35 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
 
+      - name: Resolve target period
+        id: period
+        run: |
+          # Precedence:
+          #   1. workflow_dispatch input "period" (e.g. 2026-Q1, 2026-03)
+          #   2. legacy month/year inputs → composed into YYYY-MM
+          #   3. default: previous quarter, computed from today's UTC date.
+          if [ -n "${{ inputs.period }}" ]; then
+            echo "value=${{ inputs.period }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.month }}" ] && [ -n "${{ inputs.year }}" ]; then
+            printf 'value=%s-%02d\n' "${{ inputs.year }}" "${{ inputs.month }}" >> "$GITHUB_OUTPUT"
+          else
+            # Use a date 7 days in the future as the anchor so that when the
+            # cron fires ~1 week before quarter-end (e.g. Mar 25), we still
+            # target the quarter that's about to end (Q1) rather than the
+            # one that already ended (Q4 of last year). For manual runs at
+            # any other time, this still resolves to "previous quarter".
+            year=$(date -u -d '+7 days' +%Y)
+            month=$(date -u -d '+7 days' +%-m)
+            # Previous quarter; wrap to Q4 of previous year if currently Q1.
+            current_q=$(( (month - 1) / 3 + 1 ))
+            prev_q=$(( current_q - 1 ))
+            if [ "$prev_q" -eq 0 ]; then
+              prev_q=4
+              year=$(( year - 1 ))
+            fi
+            echo "value=${year}-Q${prev_q}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run devupdate
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,14 +89,8 @@ jobs:
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           DEVUPDATE_LLM_PROVIDER: azure_openai
         run: |
-          ARGS="--repo-dir ."
-          if [ -n "${{ inputs.month }}" ]; then
-            ARGS="$ARGS --month ${{ inputs.month }}"
-          fi
-          if [ -n "${{ inputs.year }}" ]; then
-            ARGS="$ARGS --year ${{ inputs.year }}"
-          fi
-          devupdate pr $ARGS
+          echo "Generating dev update for period: ${{ steps.period.outputs.value }}"
+          devupdate pr --repo-dir . --period "${{ steps.period.outputs.value }}"
 
       - name: Upload output as artifact
         if: always()

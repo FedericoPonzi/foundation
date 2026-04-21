@@ -6,7 +6,6 @@ push, and draft pull-request via the GitHub REST API (``httpx``).
 
 from __future__ import annotations
 
-import calendar
 import logging
 import subprocess
 from pathlib import Path
@@ -55,26 +54,17 @@ def _run_git(args: list[str], repo_dir: Path) -> subprocess.CompletedProcess[str
     return result
 
 
-def _month_name(month: int) -> str:
-    """Return the full English month name for *month* (1–12)."""
-    return calendar.month_name[month]
-
-
-# ---------------------------------------------------------------------------
-# Public functions
-# ---------------------------------------------------------------------------
-
-
-def create_branch(year: int, month: int, repo_dir: Path) -> str:
-    """Switch to the branch for the monthly update, creating it if needed.
+def create_branch(slug: str, repo_dir: Path) -> str:
+    """Switch to the branch for the dev update, creating it if needed.
 
     If the branch already exists (from a prior run), it is checked out
     and reset to the current HEAD of the default branch so the new
     commit replaces the old one.
 
-    Returns the branch name, e.g. ``devupdate/2025-06``.
+    Returns the branch name, e.g. ``devupdate/2025-06`` or
+    ``devupdate/2026-q1``.
     """
-    branch = f"devupdate/{year}-{month:02d}"
+    branch = f"devupdate/{slug}"
     logger.info("Switching to branch %s", branch)
 
     try:
@@ -92,34 +82,18 @@ def commit_post(
     post_path: Path,
     asset_paths: list[Path],
     repo_dir: Path,
-    year: int,
-    month: int,
+    period_label: str,
 ) -> str:
     """Stage the post and assets, then create a commit.
 
-    Parameters
-    ----------
-    post_path:
-        Path to the rendered blog-post file (e.g. a ``.md`` file).
-    asset_paths:
-        Paths to any accompanying asset files (images, charts, etc.).
-    repo_dir:
-        Path to the local git repository.
-    year:
-        Four-digit year for the commit message.
-    month:
-        Month number (1–12) for the commit message.
-
-    Returns
-    -------
-    str
-        The full SHA of the newly created commit.
+    The commit message uses *period_label*, e.g. ``"March 2026"`` or
+    ``"Q1 2026"``.
     """
     files_to_stage = [str(post_path), *(str(p) for p in asset_paths)]
     logger.info("Staging %d file(s)", len(files_to_stage))
     _run_git(["add", "--", *files_to_stage], repo_dir)
 
-    message = f"{_month_name(month)} {year} development update"
+    message = f"{period_label} development update"
     logger.info("Committing: %s", message)
     _run_git(["commit", "-s", "-m", message], repo_dir)
 
@@ -132,8 +106,8 @@ def commit_post(
 def open_draft_pr(
     branch: str,
     target_repo: str,
-    year: int,
-    month: int,
+    period_label: str,
+    period_kind_label: str,
     contributors: list[str],
     github_token: str,
 ) -> str:
@@ -143,12 +117,12 @@ def open_draft_pr(
     If a PR already exists for that branch, its URL is returned without
     creating a duplicate.
     """
-    title = f"{_month_name(month)} {year} Development Update"
+    title = f"{period_label} {period_kind_label} Development Update"
 
     mention_lines = "\n".join(f"- {c}" for c in contributors)
     body = (
         f"## {title}\n\n"
-        "Auto-generated monthly development update.\n\n"
+        f"Auto-generated {period_kind_label.lower()} development update.\n\n"
         "### Contributors\n\n"
         f"{mention_lines}\n"
     )
@@ -210,8 +184,9 @@ def publish(
     post_path: Path,
     asset_paths: list[Path],
     target_repo: str,
-    year: int,
-    month: int,
+    slug: str,
+    period_label: str,
+    period_kind_label: str,
     contributors: list[str],
     github_token: str,
     repo_dir: Path,
@@ -226,10 +201,14 @@ def publish(
         Paths to any accompanying asset files.
     target_repo:
         GitHub ``owner/repo`` slug for the PR.
-    year:
-        Four-digit year.
-    month:
-        Month number (1–12).
+    slug:
+        Period slug (e.g. ``"2026-03"`` or ``"2026-q1"``) used for the
+        branch name and Hugo content directory.
+    period_label:
+        Human-readable period name (e.g. ``"March 2026"`` or
+        ``"Q1 2026"``).
+    period_kind_label:
+        ``"Monthly"`` or ``"Quarterly"``.
     contributors:
         GitHub usernames to @-mention.
     github_token:
@@ -242,12 +221,12 @@ def publish(
     str
         The URL of the newly created draft pull request.
     """
-    branch = create_branch(year, month, repo_dir)
+    branch = create_branch(slug, repo_dir)
 
     # Copy post + charts into Hugo content directory:
-    # content/blog/{year}-{month:02d}-dev-update/index.md
+    # content/blog/{slug}-dev-update/index.md
     import shutil
-    blog_dir = repo_dir / "content" / "blog" / f"{year}-{month:02d}-dev-update"
+    blog_dir = repo_dir / "content" / "blog" / f"{slug}-dev-update"
     blog_dir.mkdir(parents=True, exist_ok=True)
     blog_post = blog_dir / "index.md"
     shutil.copy2(post_path, blog_post)
@@ -261,7 +240,7 @@ def publish(
         blog_assets.append(dest)
     logger.info("Copied %d chart(s) to %s", len(blog_assets), blog_dir)
 
-    commit_post(blog_post, blog_assets, repo_dir, year, month)
+    commit_post(blog_post, blog_assets, repo_dir, period_label)
 
     logger.info("Pushing branch %s to origin (force)", branch)
     _run_git(["push", "--force", "--set-upstream", "origin", branch], repo_dir)
@@ -269,8 +248,8 @@ def publish(
     pr_url = open_draft_pr(
         branch=branch,
         target_repo=target_repo,
-        year=year,
-        month=month,
+        period_label=period_label,
+        period_kind_label=period_kind_label,
         contributors=contributors,
         github_token=github_token,
     )
