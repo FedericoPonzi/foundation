@@ -7,6 +7,24 @@ date = 2026-04-21
 This quarter focused on hardening verification correctness, deepening debugger support, and tightening integration across the TLA+ toolchain. TLC received several critical soundness and completeness fixes, including repairs to FcnLambdaValue handling, ENABLED semantics, bogus safety counterexamples, and truncated trace reads that could previously yield silent wrong results, alongside a new interactive debugger, trace replay, and ARM64-native builds. The VS Code extension, Apalache, TLAPM, and the examples and community modules all advanced in parallel, with integrated formatting, richer trace visualizations, improved JSON-RPC workflows, and an active community exploring liveness, refinement, and real-world modeling patterns.
 
 <!-- add hand-written highlights here -->
+## Soundness and completeness fixes in TLC
+
+This quarter saw an unusually large batch of soundness and completeness fixes
+land in TLC, most of them tracked from [#1332](https://github.com/tlaplus/tlaplus/issues/1332).
+Several had been latent for years and could, in the worst case, cause TLC to
+silently miss property violations or report bogus counter-examples. Users are
+encouraged to re-run their models against the fixed release.
+
+If you're using the [VSCode](https://marketplace.visualstudio.com/items?itemName=tlaplus.vscode-ide) extension, you're always running the latest version of TLC.
+
+This is the list of resolved issues:
+- [#1302](https://github.com/tlaplus/tlaplus/issues/1302): `FcnLambdaValue#toFcnRcd` mutated `excepts`, corrupting fingerprints and causing both missed and bogus safety/liveness violations (latent since ~2011).
+- [#1145](https://github.com/tlaplus/tlaplus/issues/1145): `FcnLambdaValue.toTuple()` dropped `EXCEPT` overrides when a lazy function was coerced to a tuple (e.g. via `SubSeq`).
+- [#1348](https://github.com/tlaplus/tlaplus/issues/1348): liveness checking reported bogus safety counter-examples by short-circuiting on accepting tableau nodes without checking the negated property's `PossibleErrorModel`.
+- [#742](https://github.com/tlaplus/tlaplus/issues/742): universally-quantified `WF`/`SF` conjuncts spuriously failed with "temporal formula is a tautology".
+- [#725](https://github.com/tlaplus/tlaplus/issues/725): fairness in instantiated submodules referencing primed variables via `SelectSeq`/`LAMBDA` failed with "undefined identifier".
+- [#1112](https://github.com/tlaplus/tlaplus/issues/1112): `DiskFPSet` could stall indefinitely after a duplicate-fingerprint warning on long-running checks.
+
 
 ## Development Updates
 
