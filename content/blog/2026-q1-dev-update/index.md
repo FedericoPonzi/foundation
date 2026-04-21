@@ -248,8 +248,9 @@ Filtered items (editor: re-add if you disagree):
 
 ### Community & Events
 
+Did you know that the community meets every month on Zoom? Fetch the calendar with the links from [here](https://zoom-lfx.platform.linuxfoundation.org/meetings/tla?view=month).
 
-- The [abridged summary of the tlaplus mailing list](https://discuss.tlapl.us/msg06624.html) highlights one notable update from the email community.
+A few interesting threads you might have missed from the [google group](https://groups.google.com/g/tlaplus/):
 
 - A thread on [checking if a set is a singleton](https://discuss.tlapl.us/msg06626.html) clarifies idiomatic TLA+ patterns for expressing and proving singleton properties.
 
@@ -329,4 +330,4 @@ Filtered items (editor: re-add if you disagree):
 
 ---
 
-Part of this post was generated using AI.
+Please note: part of this post was automatically generated using AI.
