@@ -25,6 +25,34 @@ This is the list of resolved issues:
 - [#725](https://github.com/tlaplus/tlaplus/issues/725): fairness in instantiated submodules referencing primed variables via `SelectSeq`/`LAMBDA` failed with "undefined identifier".
 - [#1112](https://github.com/tlaplus/tlaplus/issues/1112): `DiskFPSet` could stall indefinitely after a duplicate-fingerprint warning on long-running checks.
 
+## TLA+ Debugger: Interactive State-Space Exploration
+
+The TLA+ Debugger gained interactive state-space exploration: instead of
+waiting for TLC to find a violation, you can now drive your spec by hand —
+pick an initial state, choose any successor produced by `Next`, and step
+backward to any earlier state. Combined with Watch expressions on an
+animation module's `AnimView` operator, this turns the debugger into a
+graphical debugger for your protocol, where each state is rendered as an
+SVG you can navigate through.
+
+A few capabilities make this practical for real debugging sessions:
+
+- Conditional breakpoints on `Init`/`Next` (e.g. `~ENABLED Next` to halt at
+  deadlocks), and halting even when `Next` is `FALSE`.
+- Watch and Debug expressions can now load any module on the TLA-Library
+  path, so you can export the current trace mid-session as JSON, TLA+,
+  GraphViz, TLC binary, or a replayable trace expression — without
+  preconfiguring the run or forcing a violation.
+- Step-in / step-over pick "close" vs "far" successors via Hamming distance,
+  and finite stuttering is preserved for faithful behavior replay.
+
+This is the first step toward [#860](https://github.com/tlaplus/tlaplus/issues/860):
+craft interesting traces interactively, export them, and have TLC re-verify
+them against the spec as it evolves.
+
+For the full write-up by Markus Kuppe, see the [Reddit announcement](https://www.reddit.com/r/tlaplus/comments/1q7vhod/tla_debugger_interactive_statespace_exploration/),
+and watch [Interactive State-Space Exploration & Graphical Debugging with Animations](https://www.youtube.com/watch?v=ZrzoIYjFeHE)
+for a demo.
 
 ## Development Updates
 
@@ -282,3 +310,8 @@ Filtered items (editor: re-add if you disagree):
 
 - The Foundation also announced new [grant recipients](https://foundation.tlapl.us/grants/grant-recipients/index.html) whose projects aim to improve TLA+ technology and benefit the broader community.
 
+
+
+---
+
+Part of this post was generated using AI.
