@@ -4,7 +4,7 @@ title = 'Q1 2026 Quarterly Development Update'
 date = 2026-04-21
 +++
 
-This quarter focused on hardening verification correctness, deepening debugger support, and tightening integration across the TLA+ toolchain. TLC received several critical soundness and liveness fixes, including repairs to FcnLambdaValue handling, ENABLED semantics, bogus safety counterexamples, and truncated trace reads that could previously yield silent wrong results, alongside a new interactive debugger, trace replay, and ARM64-native builds. The VS Code extension, Apalache, TLAPM, and the examples and community modules all advanced in parallel, with integrated formatting, richer trace visualizations, improved JSON-RPC workflows, and an active community exploring liveness, refinement, and real-world modeling patterns.
+This quarter focused on hardening verification correctness, deepening debugger support, and tightening integration across the TLA+ toolchain. TLC received several critical soundness and completeness fixes, including repairs to FcnLambdaValue handling, ENABLED semantics, bogus safety counterexamples, and truncated trace reads that could previously yield silent wrong results, alongside a new interactive debugger, trace replay, and ARM64-native builds. The VS Code extension, Apalache, TLAPM, and the examples and community modules all advanced in parallel, with integrated formatting, richer trace visualizations, improved JSON-RPC workflows, and an active community exploring liveness, refinement, and real-world modeling patterns.
 
 <!-- add hand-written highlights here -->
 
