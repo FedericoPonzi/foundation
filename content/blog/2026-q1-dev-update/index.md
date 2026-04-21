@@ -54,6 +54,21 @@ For the full write-up by Markus Kuppe, see the [Reddit announcement](https://www
 and watch [Interactive State-Space Exploration & Graphical Debugging with Animations](https://www.youtube.com/watch?v=ZrzoIYjFeHE)
 for a demo.
 
+## Detecting PlusCal/TLA+ divergence before translating
+
+The VS Code extension now detects when the TLA+ inside a `BEGIN/END
+TRANSLATION` block has been edited by hand since the last PlusCal
+translation, and warns you before silently overwriting your changes.
+On `TLA+: Parse Module`, SANY runs first and a checksum mismatch surfaces
+a confirmation dialog so you can choose to keep your edits or re-translate.
+
+![Divergence warning when parsing the module](pluscal-divergence-translate.png)
+
+Conversely, if the PlusCal source has changed and you start model checking
+without re-translating, the extension now flags the stale TLA+ translation:
+
+![Stale-translation warning on model checking](pluscal-divergence-modelcheck.png)
+
 ## Development Updates
 
 Summaries of merged pull requests (and significant issues or releases) for
