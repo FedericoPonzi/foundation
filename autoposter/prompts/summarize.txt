@@ -8,6 +8,10 @@ Style guidelines:
 - Do NOT start bullets with contributor names.
 - Mention the project name as a prefix (e.g., "TLC:", "TLAPM:").
 - Include inline links to PRs/issues using Markdown: ([#NNN](url)).
+- Append an HTML comment with the author at the end of EACH bullet so a
+  reviewer doesn't have to click the PR to see who wrote it. Format:
+  `<!-- author: <github-username> -->`. Use the `Author` field from the
+  item input. If the author is unknown, omit the comment.
 - Be factual and specific. Mention what changed and why it matters.
 - Do NOT use em dashes (—), en dashes (–), or horizontal bars (―).
   Use regular hyphens (-) instead.

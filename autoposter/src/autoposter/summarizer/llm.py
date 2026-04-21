@@ -223,9 +223,15 @@ class LlmClient:
             "Given the following sections of a TLA+ monthly development "
             "update blog post, write a 2-3 sentence intro paragraph that "
             "names the month's focus areas and references the most "
-            "significant changes. Do not use bullet points. Do not use em "
-            "dashes, en dashes, or horizontal bars - use regular hyphens "
-            "instead.\n\n" + context
+            "significant changes.\n\n"
+            "PRIORITISE bug fixes - especially soundness, correctness, "
+            "liveness, and verifier-engine bugs - over feature work or "
+            "tooling polish. If a bullet describes a bug fix that could "
+            "cause silent incorrect results (e.g., bogus counterexamples, "
+            "missed violations, wrong booleans), call it out by name.\n\n"
+            "Do not use bullet points. Do not use em dashes, en dashes, "
+            "or horizontal bars - use regular hyphens instead.\n\n"
+            + context
         )
         return self._chat(
             system="You are a concise technical writer for the TLA+ Foundation.",
@@ -255,7 +261,10 @@ def _format_changelog_bullet(item: CollectedItem) -> str:
     """Build a bullet string from a changelog-fenced item (no LLM)."""
     body = (item.changelog_body or "").strip()
     link = f"[#{item.number}]({item.url})"
-    return f"{item.project_name}: {body} ({link})"
+    bullet = f"{item.project_name}: {body} ({link})"
+    if item.author:
+        bullet += f" <!-- author: {item.author} -->"
+    return bullet
 
 
 def _sanitize_text(text: str) -> str:

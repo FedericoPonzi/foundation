@@ -74,6 +74,14 @@ any hand-written feature sections during PR review.
 Written by the LLM last, given the other sections as context. 2 to 3
 sentences naming the month's focus.
 
+The intro is biased toward **bug-fix highlights** - especially
+soundness, correctness, liveness, and verifier-engine fixes - over
+feature work or tooling polish. If a fix could cause silent incorrect
+results (bogus counterexamples, missed violations, wrong booleans, etc.)
+the LLM is instructed to call it out by name. Examples of the kind of
+fix that should be highlighted:
+[tlaplus#1332](https://github.com/tlaplus/tlaplus/issues/1332).
+
 ### Hand-written feature sections
 
 Optional. Top-level (`H2`) sections written by the maintainer for major
@@ -103,7 +111,11 @@ Project name prefixes and source repos:
 - `Apalache`: [`apalache-mc/apalache`](https://github.com/apalache-mc/apalache)
 
 Bullets are grouped by project in the order above and otherwise sorted
-by merge date.
+by merge date. Each bullet ends with an HTML comment carrying the
+GitHub username of the author, e.g.
+`... ([#123](url)) <!-- author: alice -->`. The comment is invisible in
+rendered Markdown but lets a reviewer see who wrote a change without
+clicking through to the PR.
 
 #### Filtering & release-merging
 
