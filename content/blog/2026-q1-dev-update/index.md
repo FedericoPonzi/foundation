@@ -2,7 +2,10 @@
 type = "blog"
 title = 'Q1 2026 Quarterly Development Update'
 date = 2026-04-21
+description = "Q1 2026 highlights across the TLA+ toolchain: critical TLC soundness and completeness fixes, interactive state-space exploration in the TLA+ Debugger, PlusCal/TLA+ divergence detection in the VS Code extension, and updates from Apalache, TLAPM, the examples repository, and the community."
 +++
+
+> Please note: this post was _partially_ written using AI.
 
 This quarter focused on hardening verification correctness, deepening debugger support, and tightening integration across the TLA+ toolchain. TLC received several critical soundness and completeness fixes, including repairs to FcnLambdaValue handling, ENABLED semantics, bogus safety counterexamples, and truncated trace reads that could previously yield silent wrong results, alongside a new interactive debugger, trace replay, and ARM64-native builds. The VS Code extension, Apalache, TLAPM, and the examples and community modules all advanced in parallel, with integrated formatting, richer trace visualizations, improved JSON-RPC workflows, and an active community exploring liveness, refinement, and real-world modeling patterns.
 
@@ -69,7 +72,7 @@ without re-translating, the extension now flags the stale TLA+ translation:
 
 ![Stale-translation warning on model checking](pluscal-divergence-modelcheck.png)
 
-## Development Updates
+## Toolings Updates
 
 Summaries of merged pull requests (and significant issues or releases) for
 each project this quarter.
@@ -246,7 +249,10 @@ Filtered items (editor: re-add if you disagree):
 > Tool usage stats are opt-in and anonymized; actual usage is likely higher.
 > Source: [metabase.tlapl.us](https://metabase.tlapl.us/public/dashboard/cf7e1a79-19b6-4be1-88bf-0a3fd5aa0dec).
 
-### Community & Events
+## TLA+ Foundation Grant Program
+The TLA⁺ Foundation grant program is continuing on a rolling basis; please [submit a proposal](https://foundation.tlapl.us/grants/2024-grant-program/index.html) if you have ideas to improve TLA⁺ so the Foundation can support you financially as you work on them. You can find some desired projects listed [here](https://github.com/tlaplus/tlaplus/issues?q=is%3Aissue%20state%3Aopen%20label%3A%22TLA%2B%20Foundation%20Funding%22).
+
+## Community & Events
 
 Did you know that the community meets every month on Zoom? Fetch the calendar with the links from [here](https://zoom-lfx.platform.linuxfoundation.org/meetings/tla?view=month).
 
@@ -327,7 +333,3 @@ A few interesting threads you might have missed from the [google group](https://
 - The Foundation also announced new [grant recipients](https://foundation.tlapl.us/grants/grant-recipients/index.html) whose projects aim to improve TLA+ technology and benefit the broader community.
 
 
-
----
-
-Please note: part of this post was automatically generated using AI.
